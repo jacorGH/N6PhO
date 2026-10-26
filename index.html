@@ -15,9 +15,13 @@
   // Pick the icon set named in config.js (personal or public).
   (function () {
     var set = (window.N6 && window.N6.iconSet) || 'personal';
-    document.querySelectorAll('[data-icon]').forEach(function (el) {
-      el.setAttribute(el.tagName === 'IMG' ? 'src' : 'href', el.getAttribute('data-icon').replace('{set}', set));
-    });
+    function apply() {
+      document.querySelectorAll('[data-icon]').forEach(function (el) {
+        el.setAttribute(el.tagName === 'IMG' ? 'src' : 'href', el.getAttribute('data-icon').replace('{set}', set));
+      });
+    }
+    apply();                                              // links in <head>
+    document.addEventListener('DOMContentLoaded', apply); // images in <body>
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,6 +59,14 @@
       <input id="rom" type="file" accept=".z64,.n64,.v64,.zip,.7z">
     </label>
     <p id="romName" class="dim small">No ROM chosen</p>
+    <label class="field">
+      <span>Performance</span>
+      <select id="perfSel">
+        <option value="quality">Quality (newer phones, lighter games)</option>
+        <option value="balanced">Balanced</option>
+        <option value="fast">Fast (heavy games like Conker)</option>
+      </select>
+    </label>
     <button id="hostBtn" class="btn primary" disabled>Open room</button>
   </section>
 
@@ -75,9 +87,8 @@
 
 <!-- Play screen (host and guests) -->
 <section id="play" class="screen" hidden>
-  <div id="gameWrap" data-for="host"><div id="game"></div></div>
   <div id="screenArea">
-    <canvas id="hostView" data-for="host" hidden></canvas>
+    <div id="gameWrap" data-for="host"><div id="game"></div></div>
     <div id="crop" data-for="guest"><video id="remote" playsinline autoplay muted></video></div>
     <p id="waiting" data-for="guest">Waiting for the host to start the game…</p>
   </div>
@@ -121,6 +132,10 @@
           <option value="lr">2 players: left / right</option>
           <option value="quad">3–4 players: quarters</option>
         </select>
+        <label class="field slider">
+          <span>Shared middle strip <b id="midVal" class="dim"></b></span>
+          <input type="range" id="midRange" min="0" max="0.2" step="0.01">
+        </label>
         <p class="dim small note">Each player sees only their own view, including you. Turn it on when the match starts and off for menus. Spectators always see the whole game.</p>
         <h3>Picture quality</h3>
         <select id="qualitySel" aria-label="Picture quality">
@@ -128,6 +143,8 @@
           <option value="high">High</option>
           <option value="saver">Data saver</option>
         </select>
+        <h3>Performance</h3>
+        <dl id="perfInfo" class="net-info"><dt>Game</dt><dd>Not started</dd></dl>
         <h3>Game</h3>
         <div class="row">
           <button id="qsBtn" class="btn small">Quick save</button>
@@ -164,6 +181,25 @@
           <span>Landscape button opacity</span>
           <input type="range" id="optAlpha" min="0.15" max="1" step="0.05">
         </label>
+      </section>
+
+      <section class="stick-opts">
+        <h3>Stick and buttons</h3>
+        <label class="field slider"><span>Stick sensitivity <b id="sensVal" class="dim"></b></span>
+          <input type="range" id="optSens" min="0" max="1" step="0.05"></label>
+        <label class="field slider"><span>Dead zone <b id="dzVal" class="dim"></b></span>
+          <input type="range" id="optDz" min="0" max="0.35" step="0.01"></label>
+        <label class="field"><span>Stick response</span>
+          <select id="optCurve">
+            <option value="linear">Even</option>
+            <option value="precise">Precise (fine aiming near the centre)</option>
+            <option value="fast">Fast (reaches full tilt sooner)</option>
+          </select></label>
+        <label class="toggle"><span>Floating stick (centres where your thumb lands)</span><input type="checkbox" id="optFloat"></label>
+        <label class="toggle"><span>Invert stick up/down</span><input type="checkbox" id="optInvert"></label>
+        <label class="field slider"><span>Button size <b id="sizeVal" class="dim"></b></span>
+          <input type="range" id="optSize" min="0.8" max="1.3" step="0.05"></label>
+        <p class="dim small note">Sensitivity, dead zone, response and invert also apply to a Bluetooth controller’s stick.</p>
       </section>
 
       <button id="leaveBtn" class="btn ghost leave">Leave room</button>

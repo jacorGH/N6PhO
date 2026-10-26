@@ -4,24 +4,33 @@ const Host = (() => {
   const C = window.N6;
   const { $, esc } = App;
   let peer = null, code = '', hostName = 'Host', started = false, pingTimer = 0, romFile = null, gameName = '';
-  let audioTrack = null, drawRaf = 0, hostCtx = null;
-  let priv = false, split = 'quad', quality = 'auto';
+  let audioTrack = null, drawRaf = 0, lastDraw = 0;
+  let priv = false, split = 'quad', quality = 'auto', mid = 0.06;
+  let preset = null, gw = 0; // gw = CSS width of the emulator box (sets its render resolution)
+  const perf = { frames: 0, lastNum: null, lastT: 0, emuFps: null, hostFps: null, stalls: 0, stalledFor: 0, warned: false };
   const clients = new Map();               // peerId -> client
   const ports = [null, null, null, null];  // index 0 is always the host
   const local = { slot: 0, last: new Map() };
   const views = new Map();                 // region key -> { canvas, ctx, track, rect }
 
-  const SPLITS = {
-    tb: [[0, 0, 1, 0.5], [0, 0.5, 1, 0.5]],
-    lr: [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]],
-    quad: [[0, 0, 0.5, 0.5], [0.5, 0, 0.5, 0.5], [0, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]
-  };
+  // Split-screen regions. `mid` widens each region past the split line so things the game
+  // draws across the middle (Conker's timer, scores) stay visible to everyone.
+  const SPLIT_PORTS = { tb: 2, lr: 2, quad: 4 };
+  function regionRect(sp, i) {
+    const m = mid;
+    if (sp === 'tb') return i === 0 ? [0, 0, 1, 0.5 + m] : [0, 0.5 - m, 1, 0.5 + m];
+    if (sp === 'lr') return i === 0 ? [0, 0, 0.5 + m, 1] : [0.5 - m, 0, 0.5 + m, 1];
+    const x = i % 2 ? 0.5 - m : 0, y = i > 1 ? 0.5 - m : 0;
+    return [x, y, 0.5 + m, 0.5 + m];
+  }
 
   function open(file, name) {
     romFile = file;
     hostName = name;
     gameName = file.name.replace(/\.[^.]+$/, '');
     code = App.makeCode();
+    preset = C.perfPresets[App.prefs.get('perf')] || C.perfPresets.balanced;
+    C.streamFps = preset.fps;
     Voice.init(); // must happen inside the tap that opened the room
     peer = new Peer(C.peerPrefix + code, App.peerOptions());
 
@@ -100,17 +109,29 @@ const Host = (() => {
       updateViews();
       broadcast();
     };
-    App.onLayout(sizeHostView);
+    const midEl = $('#midRange');
+    mid = App.prefs.get('mid:' + gameName) ?? App.prefs.get('mid');
+    midEl.value = mid;
+    const showMid = () => { $('#midVal').textContent = mid ? `${Math.round(mid * 100)}%` : 'off'; };
+    showMid();
+    midEl.oninput = () => {
+      mid = +midEl.value;
+      App.prefs.set('mid:' + gameName, mid);
+      showMid();
+      for (const [k, v] of views) v.rect = rectOf(k);
+      updateViews();
+    };
+    App.onLayout(placeGame);
   }
 
   function keyFor(slot) {
     if (!priv || slot == null) return 'full';
-    return SPLITS[split][slot] ? `${split}:${slot}` : 'full';
+    return slot < SPLIT_PORTS[split] ? `${split}:${slot}` : 'full';
   }
   function rectOf(key) {
     if (key === 'full') return [0, 0, 1, 1];
     const [sp, i] = key.split(':');
-    return SPLITS[sp][+i];
+    return regionRect(sp, +i);
   }
 
   function getView(key) {
@@ -146,6 +167,7 @@ const Host = (() => {
     }
     const [, , w, h] = rectOf(keyFor(0));
     App.setAspect((w * 4) / (h * 3));
+    placeGame();
   }
 
   function swapTrack(c, track) {
@@ -174,35 +196,83 @@ const Host = (() => {
     v.ctx.drawImage(src, sx, sy, sw, sh, 0, 0, ow, oh);
   }
 
-  function sizeHostView() {
-    const hv = $('#hostView');
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const w = Math.round(hv.clientWidth * dpr), h = Math.round(hv.clientHeight * dpr);
-    if (w && h && (hv.width !== w || hv.height !== h)) { hv.width = w; hv.height = h; }
-  }
-
-  function drawHost(src, cr) {
-    const hv = $('#hostView');
-    if (hv.hidden) return;
-    if (!hostCtx) hostCtx = hv.getContext('2d');
+  // The host sees the live emulator canvas itself (no copying): the 4:3 emulator box is scaled
+  // and shifted with CSS so the host's region fills the screen area.
+  function placeGame() {
+    const box = $('#gameWrap'), area = $('#screenArea');
+    if (!gw) setRenderWidth(preset.render / Math.min(window.devicePixelRatio || 1, 3));
+    const gh = gw * 0.75;
     const [x, y, w, h] = rectOf(keyFor(0));
-    const sx = cr[0] + x * cr[2], sy = cr[1] + y * cr[3], sw = w * cr[2], sh = h * cr[3];
-    const W = hv.width, H = hv.height, ar = sw / sh;
-    let dw = W, dh = W / ar;
-    if (dh > H) { dh = H; dw = H * ar; }
-    hostCtx.fillStyle = '#000';
-    hostCtx.fillRect(0, 0, W, H);
-    hostCtx.drawImage(src, sx, sy, sw, sh, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    const W = area.clientWidth, H = area.clientHeight;
+    if (!W || !H) return;
+    const sc = Math.min(W / (w * gw), H / (h * gh));
+    const tx = (W - sc * w * gw) / 2 - sc * x * gw, ty = (H - sc * h * gh) / 2 - sc * y * gh;
+    box.style.transform = `translate(${tx}px, ${ty}px) scale(${sc})`;
   }
 
-  function frame() {
-    const src = emuCanvas();
-    if (src && src.width && src.height) {
-      const cr = contentRect(src);
-      for (const v of views.values()) drawView(v, src, cr);
-      drawHost(src, cr);
+  function setRenderWidth(cssW) {
+    gw = Math.max(160, Math.round(cssW));
+    const box = $('#gameWrap');
+    box.style.width = `${gw}px`;
+    box.style.height = `${Math.round(gw * 0.75)}px`;
+  }
+
+  // After the game starts, check the real canvas size and correct the box once so the emulator
+  // renders at the preset's width (smaller = less work for the phone).
+  function fixRenderSize() {
+    const cv = emuCanvas();
+    if (!cv || !cv.width || !gw) return;
+    const ratio = cv.width / gw;
+    if (Math.abs(cv.width - preset.render) / preset.render > 0.25 && ratio > 0) {
+      setRenderWidth(preset.render / ratio);
+      window.dispatchEvent(new Event('resize'));
+    }
+    App.layout();
+  }
+
+  // Copies for guests are made at the stream frame rate, not every screen refresh.
+  function frame(t) {
+    perf.frames++;
+    if (views.size && t - lastDraw >= 1000 / C.streamFps - 4) {
+      lastDraw = t;
+      const src = emuCanvas();
+      if (src && src.width && src.height) {
+        const cr = contentRect(src);
+        for (const v of views.values()) drawView(v, src, cr);
+      }
     }
     drawRaf = requestAnimationFrame(frame);
+  }
+
+  // Once a second: emulator frame rate, screen frame rate, and stall detection.
+  function perfTick() {
+    const now = performance.now(), dt = (now - perf.lastT) / 1000;
+    perf.hostFps = perf.lastT ? Math.round(perf.frames / dt) : null;
+    perf.frames = 0;
+    const g = gm(), num = g && typeof g.getFrameNum === 'function' ? g.getFrameNum() : null;
+    if (num != null && perf.lastNum != null) perf.emuFps = Math.max(0, Math.round((num - perf.lastNum) / dt));
+    perf.lastNum = num; perf.lastT = now;
+    const paused = window.EJS_emulator && window.EJS_emulator.paused;
+    if (started && !paused && perf.emuFps === 0) {
+      perf.stalledFor++;
+      if (perf.stalledFor === 2) {
+        perf.stalls++;
+        const audioStuck = App.resumeEmuAudio();
+        if (!perf.warned) {
+          perf.warned = true;
+          App.toast(audioStuck ? 'The game’s audio was paused by iOS, so the game froze. Tap the screen to wake it.' : (App.prefs.get('perf') === 'fast' ? 'The game stalled. This game may be too heavy for this phone; try a lighter one.' : 'The game stalled. Try Fast performance (set before opening a room) or a lighter game.'));
+        }
+      }
+    } else perf.stalledFor = 0;
+
+    const rows = [
+      ['Game speed', perf.emuFps == null ? '–' : `${perf.emuFps} fps${perf.stalledFor >= 2 ? ' (frozen)' : ''}`],
+      ['Screen', perf.hostFps == null ? '–' : `${perf.hostFps} fps`],
+      ['Freezes', String(perf.stalls)],
+      ['Game audio', App.emuAudioState()],
+      ['Mode', `${App.prefs.get('perf')}, streaming ${C.streamFps} fps`]
+    ];
+    $('#perfInfo').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }
 
   // ---------- Emulator ----------
@@ -214,6 +284,8 @@ const Host = (() => {
     window.EJS_gameName = gameName;
     window.EJS_color = '#d8352b';
     window.EJS_onGameStart = onGameStart;
+    window.EJS_defaultOptions = Object.assign({}, preset.options);
+    placeGame();
     const s = document.createElement('script');
     s.src = C.ejsData + 'loader.js';
     s.onerror = () => App.toast('Could not load the emulator. Check your connection and reload.');
@@ -234,9 +306,10 @@ const Host = (() => {
   function onGameStart() {
     started = true;
     $('#play').classList.remove('prestart');
-    $('#hostView').hidden = false;
+    setTimeout(fixRenderSize, 500);
     App.layout();
     if (!drawRaf) drawRaf = requestAnimationFrame(frame);
+    setInterval(perfTick, 1000);
     updateViews();
     attachAudio(0);
     for (const c of clients.values()) callClient(c);

@@ -104,15 +104,9 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
 #play { position: fixed; inset: 0; background: #000; overflow: hidden; }
 
 /* Portrait: game on top, controller deck fills the rest */
-/* Host: the emulator runs in a fixed 4:3 box underneath; what you see is drawn on top */
-#gameWrap {
-  position: absolute; z-index: 0;
-  top: var(--sat); left: 50%; transform: translateX(-50%);
-  width: min(100vw, calc((100vh - var(--sat) - var(--sab)) * 4 / 3));
-  aspect-ratio: 4 / 3;
-}
-#play.prestart #screenArea { background: transparent; pointer-events: none; }
-#hostView { display: block; width: 100%; height: 100%; }
+/* Host: the emulator box keeps a fixed size (its render resolution) and is scaled with CSS
+   so the host's own region fills the screen area. */
+#gameWrap { position: absolute; left: 0; top: 0; width: 640px; height: 480px; transform-origin: 0 0; }
 
 #screenArea {
   position: absolute; z-index: 1;
@@ -120,6 +114,7 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
   height: var(--screen-h);
   display: grid; place-items: center;
   background: #000;
+  overflow: hidden;
 }
 #game { width: 100%; height: 100%; }
 body.skin-under #screenArea { z-index: 3; }
@@ -317,6 +312,8 @@ body.land .sheet-card {
 .sheet-head strong { display: block; font-size: 2rem; font-weight: 900; font-stretch: 125%; letter-spacing: .12em; line-height: 1; }
 .sheet .sound { margin-top: .25rem; }
 .sheet .note { margin: .6rem 0 0; }
+.slider b { font-weight: 600; margin-left: .35rem; }
+.stick-opts .field { margin: .4rem 0 .6rem; }
 .sheet select { margin-top: .4rem; }
 #screenNote { margin-top: .5rem; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .55rem 0; font-weight: 600; }

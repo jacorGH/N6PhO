@@ -56,5 +56,20 @@ window.N6 = {
   skin: 'n64',
   hitPad: 3.5,        // extra touch area around each button, in skin units
   stickRange: 0.72,   // fraction of the stick radius needed for full tilt
-  defaults: { skin: true, haptics: true, alpha: 0.55 }
+  defaults: {
+    skin: true, haptics: true, alpha: 0.55,
+    sens: 0.5, dz: 0.08, curve: 'linear', float: false, invert: false, size: 1,
+    perf: 'balanced', mid: 0.06
+  },
+
+  // Performance presets (host). render = emulator canvas width in pixels; fps = stream frame rate.
+  // options = EmulatorJS core options for mupen64plus_next (ignored harmlessly if a build lacks one).
+  perfPresets: {
+    quality:  { render: 960, fps: 60, options: { 'mupen64plus-43screensize': '640x480', 'mupen64plus-FrameDuping': 'False' } },
+    balanced: { render: 640, fps: 30, options: { 'mupen64plus-43screensize': '320x240', 'mupen64plus-FrameDuping': 'True' } },
+    fast:     { render: 480, fps: 30, options: {
+      'mupen64plus-43screensize': '320x240', 'mupen64plus-FrameDuping': 'True', 'mupen64plus-CountPerOp': '2',
+      'mupen64plus-EnableCopyColorToRDRAM': 'Off', 'mupen64plus-EnableCopyDepthToRDRAM': 'Off'
+    } }
+  }
 };

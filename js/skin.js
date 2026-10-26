@@ -32,7 +32,10 @@ const Skin = (() => {
   let root = null, def = null, layoutDef = null, items = [], unit = 1;
   let mounted = false, opts = {};
   const pointers = new Map(); // pointerId -> { stick: bool, held: Set }
-  const stick = { id: null, x: 0, y: 0, item: null };
+  const stick = { id: null, x: 0, y: 0, item: null, ox: 0, oy: 0 };
+  // Player's stick/button settings (menu → Stick and buttons), cached so the 60 fps loop stays cheap.
+  const tune = {};
+  function loadTune() { for (const k of ['sens', 'dz', 'curve', 'float', 'invert', 'size']) tune[k] = App.prefs.get(k); }
   let touchHeld = new Set();
   let raf = 0, beat = 0, lastKey = '', lastState = null;
 
@@ -115,11 +118,15 @@ const Skin = (() => {
       const d = it.def, u = unit;
       const w = d.w * u, h = d.h * u;
       const a = d.anchor || 'bl';
-      const left = a[1] === 'l' ? d.x * u : a[1] === 'r' ? W - (d.x * u + w) : W / 2 + d.x * u - w / 2;
-      const top = a[0] === 't' ? d.y * u : H - ((d.y + lift) * u + h);
+      let left = a[1] === 'l' ? d.x * u : a[1] === 'r' ? W - (d.x * u + w) : W / 2 + d.x * u - w / 2;
+      let top = a[0] === 't' ? d.y * u : H - ((d.y + lift) * u + h);
+      // Button size setting: grow or shrink each control around its own centre.
+      const k = d.type === 'menu' ? 1 : (tune.size || 1);
+      const sw = w * k, sh = h * k;
+      left -= (sw - w) / 2; top -= (sh - h) / 2;
       const pad = d.type === 'menu' ? { t: 0, b: 0, l: 0, r: 0 } : { t: p, b: p, l: p, r: p };
-      place(it, box, left, top, w, h, pad);
-      it.el.style.fontSize = `${d.shape === 'pill' ? h * 0.55 : Math.min(w, h) * 0.4}px`;
+      place(it, box, left, top, sw, sh, pad);
+      it.el.style.fontSize = `${d.shape === 'pill' ? sh * 0.55 : Math.min(sw, sh) * 0.4}px`;
     }
   }
 
@@ -151,10 +158,13 @@ const Skin = (() => {
     return out;
   }
 
+  // Sensitivity 0..1 maps to how far you must push for full tilt (95% .. 40% of the radius).
+  const stickRange = () => 0.95 - (tune.sens ?? 0.5) * 0.55;
+
   function moveStick(e) {
     const r = stick.item.rect;
-    const rad = (Math.min(r.w, r.h) / 2) * C.stickRange;
-    let dx = (e.clientX - r.cx) / rad, dy = (e.clientY - r.cy) / rad;
+    const rad = (Math.min(r.w, r.h) / 2) * stickRange();
+    let dx = (e.clientX - stick.ox) / rad, dy = (e.clientY - stick.oy) / rad;
     const m = Math.hypot(dx, dy);
     if (m > 1) { dx /= m; dy /= m; }
     stick.x = dx; stick.y = dy;
@@ -176,6 +186,12 @@ const Skin = (() => {
     if (t === 'stick') {
       if (stick.id !== null) return;
       stick.id = e.pointerId; stick.item = it;
+      // Floating stick: wherever the thumb lands becomes the centre.
+      if (tune.float) {
+        const r = it.rect, lim = Math.min(r.w, r.h) / 2;
+        stick.ox = r.cx + App.clamp(e.clientX - r.cx, -lim, lim);
+        stick.oy = r.cy + App.clamp(e.clientY - r.cy, -lim, lim);
+      } else { stick.ox = it.rect.cx; stick.oy = it.rect.cy; }
       it.el.classList.add('on');
       pointers.set(e.pointerId, { stick: true, held: new Set() });
       moveStick(e);
@@ -238,6 +254,18 @@ const Skin = (() => {
 
   // ---------- Output ----------
   const round2 = (v) => Math.round(v * 100) / 100;
+
+  // Dead zone, response curve and invert, applied to the combined stick (touch + controller).
+  function shape(x, y) {
+    const m = Math.hypot(x, y), dz = tune.dz ?? 0.08;
+    if (m <= dz || m === 0) return [0, 0];
+    let n = Math.min(1, (m - dz) / (1 - dz));
+    if (tune.curve === 'precise') n = n * n;
+    else if (tune.curve === 'fast') n = Math.sqrt(n);
+    const k = n / m;
+    return [x * k, (tune.invert ? -y : y) * k];
+  }
+
   function read() {
     const held = new Set(touchHeld);
     let x = stick.x, y = stick.y;
@@ -247,8 +275,7 @@ const Skin = (() => {
         for (const [name, idxs] of Object.entries(C.gamepadButtons)) {
           if (idxs.some((i) => p.buttons[i] && p.buttons[i].pressed)) held.add(name);
         }
-        const ax = p.axes[0] || 0, ay = p.axes[1] || 0;
-        if (Math.hypot(ax, ay) > C.deadzone) { x += ax; y += ay; }
+        x += p.axes[0] || 0; y += p.axes[1] || 0;
         const cx = p.axes[2] || 0, cy = p.axes[3] || 0;
         if (cx > 0.5) held.add('CRIGHT');
         if (cx < -0.5) held.add('CLEFT');
@@ -259,6 +286,7 @@ const Skin = (() => {
     }
     let b = 0;
     C.digitalOrder.forEach((n, i) => { if (held.has(n)) b |= (1 << i); });
+    [x, y] = shape(App.clamp(x), App.clamp(y));
     return { t: 'in', b, x: round2(App.clamp(x)), y: round2(App.clamp(y)) };
   }
 
@@ -283,6 +311,7 @@ const Skin = (() => {
 
   function mount(el, o) {
     root = el; opts = o || {};
+    loadTune();
     layoutDef = null;
     mounted = true;
     bindOnce();
@@ -316,6 +345,30 @@ const Skin = (() => {
 
   // Swap the active skin (null = built-in). Rebuilds on the next layout.
   function setDef(d) { def = d; layoutDef = null; if (mounted) { releaseAll(); App.layout(); } }
+
+  function wireSettings() {
+    loadTune();
+    const $ = (id) => document.getElementById(id);
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    const bind = (id, key, label, fmt, relay) => {
+      const el = $(id), lab = label && $(label);
+      const show = () => { if (lab) lab.textContent = fmt(el.type === 'checkbox' ? el.checked : el.value); };
+      if (el.type === 'checkbox') el.checked = !!App.prefs.get(key); else el.value = App.prefs.get(key);
+      show();
+      el.addEventListener(el.type === 'range' ? 'input' : 'change', () => {
+        const v = el.type === 'checkbox' ? el.checked : el.type === 'range' ? +el.value : el.value;
+        App.prefs.set(key, v); tune[key] = v; show();
+        if (relay && mounted) relayout();
+      });
+    };
+    bind('optSens', 'sens', 'sensVal', (v) => (v < 0.34 ? 'low' : v < 0.67 ? 'medium' : 'high') + `, ${pct(+v)}`);
+    bind('optDz', 'dz', 'dzVal', (v) => pct(+v));
+    bind('optCurve', 'curve');
+    bind('optFloat', 'float');
+    bind('optInvert', 'invert');
+    bind('optSize', 'size', 'sizeVal', (v) => pct(+v), true);
+  }
+  window.addEventListener('DOMContentLoaded', wireSettings);
 
   return {
     mount, unmount, relayout, setVisible, setDef,

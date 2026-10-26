@@ -9,6 +9,33 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
 - **Guests send only controller input** back; the host feeds it into ports 2–4.
 - **Spectators** watch without a port. The host can move people between watching and playing.
 
+## Performance and freezes
+- **Performance** (lobby, under Host a room; applies when you open the room):
+  *Quality* for newer phones and lighter games, *Balanced* (default), *Fast* for heavy games like
+  Conker. Each preset sets the emulator's internal resolution, its canvas size, and the stream frame
+  rate, plus some speed settings in Fast. These are EmulatorJS core options for mupen64plus_next;
+  if an EmulatorJS build doesn't recognise one, it's ignored.
+- The host now sees the emulator's own canvas directly (scaled with CSS) instead of a per-frame
+  copy, and guest pictures are copied at the stream rate (30 fps on Balanced/Fast), not 60.
+- **Host menu → Performance** shows game speed (emulator frames per second), screen frame rate,
+  how many freezes have happened, and the game audio state. If the game stops advancing for
+  2 seconds, N6PhO counts a freeze and tries to recover.
+- **Why audio matters:** the emulator keeps time with its audio. iOS can pause web audio (the mic
+  switching audio modes, a call, Siri), and that freezes the game while everything else keeps
+  working. N6PhO nudges the audio back every second and on every tap. If *Game audio* shows
+  anything other than "running" during a freeze, that's the cause.
+
+## Stick and buttons
+Menu → Stick and buttons (saved per phone):
+- **Stick sensitivity:** how far you push for full tilt.
+- **Dead zone:** how far you push before anything happens.
+- **Stick response:** *Even*, *Precise* (fine aiming near the centre, good for GoldenEye), or
+  *Fast* (reaches full tilt sooner).
+- **Floating stick:** wherever your thumb lands becomes the centre.
+- **Invert stick up/down.**
+- **Button size:** 80% to 130% (built-in skin).
+Sensitivity, dead zone, response and invert also apply to a Bluetooth controller's stick.
+
 ## Voice chat
 Menu → Voice chat → **Microphone**. Everyone in the room hears you, spectators included.
 A mic button appears next to the status badge; tap it to mute and unmute.
@@ -44,6 +71,9 @@ The host's own screen shows only port 1's view too. Spectators always get the wh
 - Turn it on when the match starts and off for menus (menus use the whole screen).
 - Players whose port isn't part of the split (e.g. port 3 in a 2-player match) see the whole game.
 - Top / bottom halves are wide strips; landscape gives them much more room.
+- **Shared middle strip** (0–20%, default 6%, remembered per game) widens each player's view past
+  the split line so things drawn across the middle, like Conker's timer, stay visible to everyone.
+  The trade-off is a thin sliver of the neighbouring view.
 
 ## Touch controller
 - **Portrait:** game on top, full controller deck below. On tall phones the controls lift

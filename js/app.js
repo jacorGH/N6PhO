@@ -14,7 +14,7 @@ const App = (() => {
   }
 
   // 2) Tap the emulator's audio: anything connected to the speakers also feeds a stream node.
-  const audio = { dest: null };
+  const audio = { dest: null, ctxs: new Set() };
   if (window.AudioNode) {
     const origConnect = AudioNode.prototype.connect;
     const dests = new WeakMap();
@@ -23,6 +23,7 @@ const App = (() => {
       try {
         if (window.AudioDestinationNode && target instanceof AudioDestinationNode && !target.context.__n6mixer) {
           const ctx = target.context;
+          audio.ctxs.add(ctx);
           let d = dests.get(ctx);
           if (!d && ctx.createMediaStreamDestination) {
             d = ctx.createMediaStreamDestination();
@@ -62,6 +63,19 @@ const App = (() => {
     if (C.iceServers) o.config = { iceServers: C.iceServers };
     return o;
   }
+  // The emulator times itself off its audio. If iOS suspends that audio (a call, Siri, the mic
+  // switching the audio session), the game freezes, so keep nudging it back to running.
+  function resumeEmuAudio() {
+    let stuck = false;
+    for (const ctx of audio.ctxs) {
+      if (ctx.state !== 'running' && ctx.state !== 'closed') { stuck = true; ctx.resume().catch(() => {}); }
+    }
+    return stuck;
+  }
+  const emuAudioState = () => { for (const c of audio.ctxs) return c.state; return 'none'; };
+  document.addEventListener('pointerdown', resumeEmuAudio, true);
+  setInterval(resumeEmuAudio, 1000);
+
   function audioTrack() { return audio.dest ? audio.dest.stream.getAudioTracks()[0] || null : null; }
 
   let toastTimer = 0;
@@ -166,6 +180,10 @@ const App = (() => {
       codeEl.value = codeEl.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     });
 
+    const perfEl = $('#perfSel');
+    perfEl.value = prefs.get('perf');
+    perfEl.addEventListener('change', () => prefs.set('perf', perfEl.value));
+
     romEl.addEventListener('change', () => {
       const f = romEl.files[0];
       msg('romName', f ? f.name : 'No ROM chosen');
@@ -195,6 +213,6 @@ const App = (() => {
   }
   window.addEventListener('DOMContentLoaded', init);
 
-  return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake,
+  return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake, resumeEmuAudio, emuAudioState,
     layout, setAspect, onLayout, setScreenRect, enterPlay, openMenu, closeMenu };
 })();
