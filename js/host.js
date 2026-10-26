@@ -5,7 +5,7 @@ const Host = (() => {
   const { $, esc } = App;
   let peer = null, code = '', hostName = 'Host', started = false, pingTimer = 0, romFile = null, gameName = '';
   let audioTrack = null, drawRaf = 0, hostCtx = null;
-  let priv = false, split = 'quad';
+  let priv = false, split = 'quad', quality = 'auto';
   const clients = new Map();               // peerId -> client
   const ports = [null, null, null, null];  // index 0 is always the host
   const local = { slot: 0, last: new Map() };
@@ -22,6 +22,7 @@ const Host = (() => {
     hostName = name;
     gameName = file.name.replace(/\.[^.]+$/, '');
     code = App.makeCode();
+    Voice.init(); // must happen inside the tap that opened the room
     peer = new Peer(C.peerPrefix + code, App.peerOptions());
 
     peer.on('open', () => {
@@ -40,6 +41,16 @@ const Host = (() => {
       App.toast(`Room ${code} is open. Tap play on the game to start.`);
     });
     peer.on('connection', (conn) => conn.on('open', () => onJoin(conn)));
+    peer.on('call', (call) => {
+      // Guests send their microphone on a separate one-way call.
+      const c = clients.get(call.peer);
+      if (!c || !call.metadata || call.metadata.kind !== 'voice') { try { call.close(); } catch (e) {} return; }
+      try { if (c.voiceCall) c.voiceCall.close(); } catch (e) {}
+      c.voiceCall = call;
+      call.answer();
+      call.on('stream', (st) => { Voice.addVoice(c.id, st); render(); });
+      call.on('close', () => { if (c.voiceCall === call) { Voice.removeVoice(c.id); c.voiceCall = null; render(); } });
+    });
     peer.on('disconnected', () => {
       App.toast('Lost the room server. Reconnecting… (connected players stay connected)');
       try { peer.reconnect(); } catch (e) {}
@@ -56,12 +67,18 @@ const Host = (() => {
     $('#inviteBtn').onclick = invite;
     $('#portList').onclick = onAction;
     $('#specList').onclick = onAction;
+    MicUI.wire({ start: () => Voice.startHostMic(), stop: () => Voice.stopMic() });
+    const qEl = $('#qualitySel');
+    quality = App.prefs.get('quality') || 'auto';
+    qEl.value = quality;
+    qEl.onchange = () => { quality = qEl.value; App.prefs.set('quality', quality); for (const c of clients.values()) c.rate = null; };
     $('#qsBtn').onclick = () => gameCall('quickSave', 'Saved.');
     $('#qlBtn').onclick = () => gameCall('quickLoad', 'Loaded.');
   }
 
   function close() {
-    for (const c of clients.values()) send(c, { t: 'note', text: 'The host closed the room.' });
+    for (const c of clients.values()) send(c, { t: 'closed' });
+    Voice.stopMic();
     try { peer.destroy(); } catch (e) {}
   }
 
@@ -226,13 +243,14 @@ const Host = (() => {
     broadcast();
   }
 
-  // Audio starts a moment after the game; once it exists, re-call guests so they get sound.
+  // Game audio starts a moment after the game. It feeds each guest's mix (game + voices).
+  // Without Web Audio, fall back to sending the raw game audio and re-calling guests.
   function attachAudio(tries) {
     const a = App.audioTrack();
     if (a) {
       if (!audioTrack) {
         audioTrack = a;
-        if (tries > 0) for (const c of clients.values()) callClient(c);
+        if (!Voice.setGame(a) && tries > 0) for (const c of clients.values()) callClient(c);
       }
       return;
     }
@@ -244,46 +262,69 @@ const Host = (() => {
     try { if (c.call) c.call.close(); } catch (e) {}
     c.viewKey = keyFor(c.slot);
     const tracks = [getView(c.viewKey).track];
-    if (audioTrack) tracks.push(audioTrack);
+    const mix = Voice.outFor(c.id);
+    if (mix) tracks.push(mix); else if (audioTrack) tracks.push(audioTrack);
     const call = peer.call(c.id, new MediaStream(tracks));
     c.call = call;
-    if (call) setTimeout(() => tuneBitrate(call), 1500);
+    c.stats = null; c.statPrev = null;
+    if (call) setTimeout(() => {
+      if (call.peerConnection) NetStats.applyRate(call.peerConnection, c.rate || C.videoBitrate, C.streamFps);
+    }, 1500);
   }
 
-  async function tuneBitrate(call) {
-    const pc = call.peerConnection;
-    if (!pc) return;
-    for (const s of pc.getSenders()) {
-      if (!s.track || s.track.kind !== 'video') continue;
-      const p = s.getParameters();
-      if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-      p.encodings[0].maxBitrate = C.videoBitrate;
-      p.encodings[0].maxFramerate = C.streamFps;
-      try { await s.setParameters(p); } catch (e) {}
-    }
+  // Every 2 s: read each guest's connection and adjust their picture quality.
+  async function sampleStats(c) {
+    const pc = c.call && c.call.peerConnection;
+    if (!pc || pc.connectionState === 'closed') return;
+    try {
+      const st = await NetStats.outbound(pc, c.statPrev);
+      c.statPrev = st;
+      if (st.kbps == null) return;
+      c.stats = st;
+      const { rate, fps } = NetStats.adapt(c, st, quality);
+      if (rate !== c.rate || fps !== c.fps) { c.rate = rate; c.fps = fps; NetStats.applyRate(pc, rate, fps); }
+    } catch (e) { /* stats are best-effort */ }
   }
 
   // ---------- Guests ----------
   function onJoin(conn) {
     const meta = conn.metadata || {};
-    const c = { id: conn.peer, conn, name: String(meta.name || 'Guest').slice(0, 16), slot: null, rtt: null, call: null, viewKey: null, last: new Map() };
+    const token = typeof meta.token === 'string' ? meta.token.slice(0, 64) : null;
+    const c = {
+      id: conn.peer, conn, token, name: String(meta.name || 'Guest').slice(0, 16),
+      slot: null, rtt: null, call: null, voiceCall: null, viewKey: null, last: new Map(),
+      lastSeen: Date.now(), rate: null, fps: null, stats: null, statPrev: null
+    };
+
+    // Same person on a new connection (reload or network change): take over the old one.
+    let back = null;
+    if (token) {
+      const ghost = [...clients.values()].find((x) => x.token === token);
+      if (ghost) { back = ghost.slot; drop(ghost, 'replaced'); }
+      const held = ports.findIndex((p) => p && p.reserved && p.token === token);
+      if (held > 0) { back = held; ports[held] = null; }
+    }
+
     clients.set(c.id, c);
-    if (meta.role === 'player') {
+    if (back != null && back > 0 && !ports[back]) seat(c, back);
+    else if (meta.role === 'player') {
       const s = freeSlot();
       if (s > 0) seat(c, s);
       else send(c, { t: 'note', text: 'All four ports are taken, so you joined as a spectator.' });
     }
     conn.on('data', (d) => onData(c, d));
-    conn.on('close', () => drop(c));
-    conn.on('error', () => drop(c));
+    conn.on('close', () => drop(c, 'lost'));
+    conn.on('error', () => drop(c, 'lost'));
     callClient(c);
-    App.toast(`${c.name} joined${c.slot != null ? ` on port ${c.slot + 1}` : ' to watch'}.`);
+    App.toast(back != null ? `${c.name} is back on port ${c.slot + 1}.` : `${c.name} joined${c.slot != null ? ` on port ${c.slot + 1}` : ' to watch'}.`);
     broadcast();
   }
 
   function onData(c, d) {
     if (!d || typeof d !== 'object') return;
+    c.lastSeen = Date.now();
     if (d.t === 'in') applyInput(c, d);
+    else if (d.t === 'bye') drop(c, 'leave');
     else if (d.t === 'pong' && typeof d.ts === 'number') c.rtt = Math.round(performance.now() - d.ts);
   }
 
@@ -312,16 +353,26 @@ const Host = (() => {
   }
 
   function freeSlot() { for (let i = 1; i < 4; i++) if (!ports[i]) return i; return -1; }
-  function seat(c, s) { release(c); if (c.slot != null) ports[c.slot] = null; ports[s] = c; c.slot = s; updateViews(); }
-  function unseat(c) { release(c); if (c.slot != null) ports[c.slot] = null; c.slot = null; updateViews(); }
+  function seat(c, s) { release(c); if (c.slot != null && ports[c.slot] === c) ports[c.slot] = null; ports[s] = c; c.slot = s; updateViews(); }
+  function unseat(c) { release(c); if (c.slot != null && ports[c.slot] === c) ports[c.slot] = null; c.slot = null; updateViews(); }
 
-  function drop(c) {
+  // reason: lost (connection dropped, port is held), leave, kick, replaced
+  function drop(c, reason) {
     if (!clients.has(c.id)) return;
+    clients.delete(c.id); // first, so the close events below can't re-enter
+    const slot = c.slot;
     unseat(c);
+    if (reason === 'lost' && slot != null && c.token) {
+      ports[slot] = { reserved: true, token: c.token, name: c.name, until: Date.now() + C.reconnectWindow };
+    }
     try { if (c.call) c.call.close(); } catch (e) {}
-    clients.delete(c.id);
+    try { if (c.voiceCall) c.voiceCall.close(); } catch (e) {}
+    try { c.conn.close(); } catch (e) {}
+    Voice.removeVoice(c.id);
+    Voice.dropOut(c.id);
     updateViews();
-    App.toast(`${c.name} left.`);
+    if (reason === 'lost' && slot != null) App.toast(`${c.name} lost connection. Holding port ${slot + 1} for them.`);
+    else if (reason !== 'replaced') App.toast(`${c.name} left.`);
     broadcast();
   }
 
@@ -331,6 +382,7 @@ const Host = (() => {
     return {
       t: 'roster', code,
       ports: ports.map((p, i) => (i === 0 ? hostName : p ? p.name : null)),
+      rate: c.rate,
       you: c.slot,
       watching: [...clients.values()].filter((x) => x.slot == null).length,
       rtt: c.rtt, started,
@@ -345,9 +397,18 @@ const Host = (() => {
   }
 
   function pingAll() {
-    const ts = performance.now();
-    for (const c of clients.values()) send(c, { t: 'ping', ts, roster: rosterFor(c) });
-    render();
+    const ts = performance.now(), now = Date.now();
+    for (const c of [...clients.values()]) {
+      if (now - c.lastSeen > 8000) { drop(c, 'lost'); continue; } // silent for 8 s: treat as dropped
+      send(c, { t: 'ping', ts, roster: rosterFor(c) });
+      sampleStats(c);
+    }
+    let changed = false;
+    for (let i = 1; i < 4; i++) {
+      const p = ports[i];
+      if (p && p.reserved && now > p.until) { ports[i] = null; changed = true; App.toast(`${p.name} didn’t come back. Port ${i + 1} is open.`); }
+    }
+    if (changed) broadcast(); else { render(); badge(); }
   }
 
   // ---------- Host UI ----------
@@ -363,8 +424,13 @@ const Host = (() => {
       if (i === 0) return `<li class="port p1"><span class="n">1</span><span class="who">${esc(hostName)}<small>You, hosting</small></span></li>`;
       const p = ports[i];
       if (!p) return `<li class="port p${n} open"><span class="n">${n}</span><span class="who">Open<small>Waiting for a player</small></span></li>`;
+      if (p.reserved) {
+        const secs = Math.max(0, Math.round((p.until - Date.now()) / 1000));
+        return `<li class="port p${n} open"><span class="n">${n}</span><span class="who">${esc(p.name)}<small>Reconnecting… holding for ${secs}s</small></span>
+          <span class="acts"><button class="btn small ghost" data-act="free" data-slot="${i}">Free this port</button></span></li>`;
+      }
       return `<li class="port p${n}"><span class="n">${n}</span>
-        <span class="who">${esc(p.name)}<small>${p.rtt != null ? p.rtt + ' ms' : 'Connecting…'}</small></span>
+        <span class="who">${esc(p.name)}${Voice.talking(p.id) ? ' <span class="vc" title="Voice on">🎙</span>' : ''}<small>${statLine(p)}</small></span>
         <span class="acts">
           <button class="btn small ghost" data-act="unseat" data-id="${esc(p.id)}">Move to watching</button>
           <button class="btn small ghost" data-act="kick" data-id="${esc(p.id)}">Remove</button>
@@ -374,7 +440,7 @@ const Host = (() => {
     const specs = [...clients.values()].filter((c) => c.slot == null);
     const open = freeSlot() > 0;
     $('#specList').innerHTML = specs.length
-      ? specs.map((c) => `<li><span class="who">${esc(c.name)}<small>${c.rtt != null ? c.rtt + ' ms' : 'Connecting…'}</small></span>
+      ? specs.map((c) => `<li><span class="who">${esc(c.name)}${Voice.talking(c.id) ? ' <span class="vc" title="Voice on">🎙</span>' : ''}<small>${statLine(c)}</small></span>
           <span class="acts">
             ${open ? `<button class="btn small" data-act="seat" data-id="${esc(c.id)}">Give a port</button>` : ''}
             <button class="btn small ghost" data-act="kick" data-id="${esc(c.id)}">Remove</button>
@@ -382,16 +448,31 @@ const Host = (() => {
       : '<li class="dim small empty">No one is watching yet.</li>';
   }
 
+  function statLine(c) {
+    if (c.rtt == null) return 'Connecting…';
+    const st = c.stats;
+    const g = NetStats.grade(c.rtt, st && st.loss);
+    const parts = [`<span class="sig" data-q="${g}"><i></i><i></i><i></i></span>${c.rtt} ms`];
+    if (st) {
+      parts.push(NetStats.fmtKbps(st.kbps));
+      if (st.loss != null) parts.push(`${NetStats.fmtLoss(st.loss)} loss`);
+      if (st.fps != null) parts.push(`${st.fps} fps`);
+      if (st.relay) parts.push('relayed');
+    }
+    return parts.join(', ');
+  }
+
   function onAction(e) {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
+    if (b.dataset.act === 'free') { ports[+b.dataset.slot] = null; broadcast(); return; }
     const c = clients.get(b.dataset.id);
     if (!c) return;
     if (b.dataset.act === 'unseat') unseat(c);
     if (b.dataset.act === 'seat') { const s = freeSlot(); if (s > 0) seat(c, s); }
     if (b.dataset.act === 'kick') {
       send(c, { t: 'kick' });
-      setTimeout(() => { try { c.conn.close(); } catch (err) {} drop(c); }, 300);
+      setTimeout(() => drop(c, 'kick'), 300);
     }
     broadcast();
   }

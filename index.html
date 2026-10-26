@@ -7,9 +7,19 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#3d4046">
 <title>N6PhO</title>
-<link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/png" sizes="64x64" href="icons/icon-64.png">
-<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+<link rel="manifest" data-icon="manifest-{set}.json">
+<link rel="icon" type="image/png" sizes="64x64" data-icon="icons/{set}/icon-64.png">
+<link rel="apple-touch-icon" sizes="180x180" data-icon="icons/{set}/icon-180.png">
+<script src="js/config.js"></script>
+<script>
+  // Pick the icon set named in config.js (personal or public).
+  (function () {
+    var set = (window.N6 && window.N6.iconSet) || 'personal';
+    document.querySelectorAll('[data-icon]').forEach(function (el) {
+      el.setAttribute(el.tagName === 'IMG' ? 'src' : 'href', el.getAttribute('data-icon').replace('{set}', set));
+    });
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
@@ -20,7 +30,7 @@
 <!-- Lobby -->
 <main id="lobby" class="screen">
   <header class="brand">
-    <img class="brand-icon" src="icons/icon-192.png" alt="" width="84" height="84">
+    <img class="brand-icon" data-icon="icons/{set}/icon-192.png" alt="" width="84" height="84">
     <h1>N6PhO</h1>
     <p>N64 netplay on your phone. Four players, plus anyone who wants to watch.</p>
   </header>
@@ -74,8 +84,18 @@
 
   <div id="skin" class="skin" hidden></div>
 
+  <div class="hudrow">
   <div id="badge" class="badge"></div>
+  <button id="micBtn" class="mic" aria-label="Mute microphone" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke-width="2" stroke-linecap="round"/><path class="slash" d="M4 4l16 16" fill="none" stroke-width="2.4" stroke-linecap="round"/></svg>
+  </button>
+  </div>
   <button id="menuFab" class="fab" aria-label="Open menu" hidden><span class="bars"></span></button>
+  <div id="reconnecting" class="reconnecting" hidden>
+    <div class="spinner" aria-hidden="true"></div>
+    <p><strong>Reconnecting…</strong><br><span class="dim">Your port is being held for you.</span></p>
+    <button id="giveUpBtn" class="btn small ghost">Leave room</button>
+  </div>
   <p id="toast" class="toast" role="status" hidden></p>
 
   <div id="sheet" class="sheet" hidden>
@@ -102,6 +122,12 @@
           <option value="quad">3–4 players: quarters</option>
         </select>
         <p class="dim small note">Each player sees only their own view, including you. Turn it on when the match starts and off for menus. Spectators always see the whole game.</p>
+        <h3>Picture quality</h3>
+        <select id="qualitySel" aria-label="Picture quality">
+          <option value="auto">Auto (adjusts to each connection)</option>
+          <option value="high">High</option>
+          <option value="saver">Data saver</option>
+        </select>
         <h3>Game</h3>
         <div class="row">
           <button id="qsBtn" class="btn small">Quick save</button>
@@ -112,6 +138,14 @@
       <section data-for="guest">
         <p id="screenNote" class="dim small">You’ll see the whole game until the host turns on private screens.</p>
         <button id="soundBtn" class="btn small sound">Turn sound on</button>
+        <h3>Connection</h3>
+        <dl id="netInfo" class="net-info"><dt>Status</dt><dd>Connecting…</dd></dl>
+      </section>
+
+      <section>
+        <h3>Voice chat</h3>
+        <label class="toggle"><span>Microphone</span><input type="checkbox" id="optMic"></label>
+        <p class="dim small note">Everyone in the room hears you, spectators included. Headphones stop echo. Tap the mic button on screen to mute.</p>
       </section>
 
       <section>
@@ -138,11 +172,12 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="js/config.js"></script>
 <script src="js/skin-n64.js"></script>
 <script src="js/app.js"></script>
 <script src="js/skin.js"></script>
 <script src="js/deltaskin.js"></script>
+<script src="js/voice.js"></script>
+<script src="js/netstats.js"></script>
 <script src="js/host.js"></script>
 <script src="js/guest.js"></script>
 </body>

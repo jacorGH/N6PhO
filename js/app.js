@@ -21,7 +21,7 @@ const App = (() => {
     AudioNode.prototype.connect = function (target, ...rest) {
       const result = origConnect.call(this, target, ...rest);
       try {
-        if (window.AudioDestinationNode && target instanceof AudioDestinationNode) {
+        if (window.AudioDestinationNode && target instanceof AudioDestinationNode && !target.context.__n6mixer) {
           const ctx = target.context;
           let d = dests.get(ctx);
           if (!d && ctx.createMediaStreamDestination) {

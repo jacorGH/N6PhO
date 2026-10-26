@@ -1,5 +1,8 @@
 // N6PhO configuration. Everything tweakable lives here.
 window.N6 = {
+  // Home-screen icon: 'personal' (your original) or 'public' (the stand-in for sharing widely).
+  iconSet: 'personal',
+
   // Prefix for PeerJS ids on the public PeerJS server, so room codes don't collide with other apps.
   peerPrefix: 'n6pho-v1-',
 
@@ -17,6 +20,7 @@ window.N6 = {
   // Stream. The host uploads one stream PER guest: total upload = videoBitrate x guests.
   streamFps: 60,
   videoBitrate: 2000000,
+  minBitrate: 400000,  // auto quality never drops below this
   maxStreamWidth: 960, // each guest's picture is scaled down to at most this width before sending
 
   // Keeps WebGL frames readable so the canvas can be captured (Safari needs this).
@@ -44,6 +48,9 @@ window.N6 = {
   },
   deadzone: 0.15,
   inputHeartbeat: 150,
+
+  // How long a dropped player's port is held for them while they reconnect (ms).
+  reconnectWindow: 60000,
 
   // Touch controls
   skin: 'n64',

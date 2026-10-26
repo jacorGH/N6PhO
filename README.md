@@ -9,6 +9,31 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
 - **Guests send only controller input** back; the host feeds it into ports 2–4.
 - **Spectators** watch without a port. The host can move people between watching and playing.
 
+## Voice chat
+Menu → Voice chat → **Microphone**. Everyone in the room hears you, spectators included.
+A mic button appears next to the status badge; tap it to mute and unmute.
+- The host's phone is the hub: it mixes the game sound with everyone's voices and sends each
+  person a mix without their own voice in it, so nobody hears themselves.
+- Use headphones if you can. Phone speakers plus a mic can echo, and iPhones lower game volume
+  while the mic is on.
+- If voices are silent, tap the screen once (browsers hold back sound until you tap).
+
+## Auto-reconnect
+If a player's connection drops, the host **holds their port for 60 seconds** (shown as
+"Reconnecting…" in the host's player list). The player's phone retries on its own and drops
+them straight back into the same port, mic included. Reloading the page or rejoining with the
+invite link also gets your port back. Nobody else can take a held port; the host can free it early.
+Leaving on purpose frees the port right away. Change the hold time with `reconnectWindow` in `js/config.js`.
+
+## Connection stats and picture quality
+- **Signal bars** in the badge show each connection at a glance (green good, yellow OK, red poor).
+- **Host menu → Players:** ping, bitrate, packet loss, frame rate for every guest, and whether
+  the connection goes direct or through a relay server.
+- **Guest menu → Connection:** the same from the receiving side, plus picture resolution.
+- **Picture quality (host menu):** *Auto* tunes each guest separately: it backs off when that
+  guest's connection starts losing packets or lagging, creeps back up when it's clean, and drops
+  to 30 fps if the host phone itself is overloaded. *High* and *Data saver* fix the quality instead.
+
 ## Private screens (no screen watching)
 Split-screen games put every player's view on one picture. With **Private screens** on, the host
 cuts the picture up *before sending it*, so each player only ever receives their own view.
@@ -51,9 +76,11 @@ Units: portrait 1u = 1% of screen width, landscape 1u = 1% of screen height. Eac
 `anchor` (`tl`, `tc`, `tr`, `bl`, `bc`, `br`) and x/y measured from that corner.
 Add a new skin by copying the file, changing the name, and setting `skin` in `js/config.js`.
 
-## Icon
-`icons/` holds the home-screen icon (180 px for iPhone, 192/512 px for Android) and favicon.
-`manifest.json` makes it installable with **Add to Home Screen**.
+## Icons
+Two icon sets: `icons/personal/` (the original) and `icons/public/` (the stand-in for sharing
+widely). Switch with `iconSet` at the top of `js/config.js`. Each set has a matching manifest
+(`manifest-personal.json`, `manifest-public.json`) so **Add to Home Screen** works on iPhone and
+Android. iPhones keep the icon they saved, so remove and re-add the home-screen app after switching.
 
 ## Setup
 1. Push this folder to a GitHub repo and turn on GitHub Pages (Settings → Pages → main / root).
