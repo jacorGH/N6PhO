@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#3d4046">
+<title>Four Ports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Lobby -->
+<main id="lobby" class="screen">
+  <header class="brand">
+    <h1>Four Ports</h1>
+    <p>N64 netplay for up to four players, plus anyone who wants to watch.</p>
+  </header>
+
+  <div class="sockets" aria-hidden="true">
+    <span class="socket p1"><b>1</b></span>
+    <span class="socket p2"><b>2</b></span>
+    <span class="socket p3"><b>3</b></span>
+    <span class="socket p4"><b>4</b></span>
+  </div>
+
+  <label class="field">
+    <span>Your name</span>
+    <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player">
+  </label>
+
+  <section class="panel">
+    <h2>Host a room</h2>
+    <p class="dim">Your phone runs the game and streams it to everyone else. Only you need the ROM.</p>
+    <label class="btn file">
+      Choose ROM
+      <input id="rom" type="file" accept=".z64,.n64,.v64,.zip,.7z">
+    </label>
+    <p id="romName" class="dim small">No ROM chosen</p>
+    <button id="hostBtn" class="btn primary" disabled>Open room</button>
+  </section>
+
+  <section class="panel">
+    <h2>Join a room</h2>
+    <label class="field">
+      <span>Room code</span>
+      <input id="code" class="code" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
+    </label>
+    <div class="row">
+      <button id="joinBtn" class="btn primary">Join as player</button>
+      <button id="watchBtn" class="btn ghost">Watch</button>
+    </div>
+  </section>
+
+  <p id="lobbyMsg" class="msg" role="status"></p>
+</main>
+
+<!-- Host -->
+<section id="hostScreen" class="screen" hidden>
+  <div id="gameWrap"><div id="game"></div></div>
+  <aside class="host-bar">
+    <div class="room">
+      <div>
+        <span class="dim small">Room code</span>
+        <strong id="roomCode">----</strong>
+      </div>
+      <button id="inviteBtn" class="btn small">Share invite</button>
+    </div>
+    <ol id="portList" class="port-list"></ol>
+    <h3>Watching</h3>
+    <ul id="specList" class="spec-list"></ul>
+    <p id="hostMsg" class="msg" role="status">Tap the play button on the game to start. Guests can join any time.</p>
+  </aside>
+</section>
+
+<!-- Guest / spectator -->
+<section id="guestScreen" class="screen" hidden>
+  <div id="stage">
+    <div id="crop"><video id="remote" playsinline autoplay muted></video></div>
+    <p id="waiting">Waiting for the host to start the game…</p>
+  </div>
+
+  <div class="hud">
+    <span id="myPort" class="pill">Watching</span>
+    <span id="myPing" class="pill">– ms</span>
+    <select id="view" class="pill" aria-label="View">
+      <option value="full">Full screen</option>
+      <option value="top">Top half</option>
+      <option value="bottom">Bottom half</option>
+      <option value="left">Left half</option>
+      <option value="right">Right half</option>
+      <option value="q1">Top-left quarter</option>
+      <option value="q2">Top-right quarter</option>
+      <option value="q3">Bottom-left quarter</option>
+      <option value="q4">Bottom-right quarter</option>
+    </select>
+    <button id="soundBtn" class="pill btn-pill">Turn sound on</button>
+    <button id="padBtn" class="pill btn-pill" hidden>Hide touch pad</button>
+    <button id="leaveBtn" class="pill btn-pill">Leave</button>
+  </div>
+  <p id="toast" class="toast" role="status" hidden></p>
+
+  <div id="touchPad" class="pad" hidden>
+    <div class="pad-left">
+      <div class="shoulders">
+        <button data-btn="L" class="tb shoulder">L</button>
+        <button data-btn="Z" class="tb shoulder">Z</button>
+      </div>
+      <div id="stick" class="stick"><div class="knob"></div></div>
+    </div>
+    <button data-btn="START" class="tb start">Start</button>
+    <div class="pad-right">
+      <button data-btn="R" class="tb shoulder rs">R</button>
+      <div class="cbtns">
+        <button data-btn="CUP" class="tb c u" aria-label="C up">▲</button>
+        <button data-btn="CLEFT" class="tb c l" aria-label="C left">◀</button>
+        <button data-btn="CRIGHT" class="tb c r" aria-label="C right">▶</button>
+        <button data-btn="CDOWN" class="tb c d" aria-label="C down">▼</button>
+      </div>
+      <button data-btn="B" class="tb face b">B</button>
+      <button data-btn="A" class="tb face a">A</button>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script src="js/input.js"></script>
+<script src="js/host.js"></script>
+<script src="js/guest.js"></script>
+</body>
+</html>
