@@ -107,6 +107,17 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
 /* Host: the emulator box keeps a fixed size (its render resolution) and is scaled with CSS
    so the host's own region fills the screen area. */
 #gameWrap { position: absolute; left: 0; top: 0; width: 640px; height: 480px; transform-origin: 0 0; }
+/* Once the game runs, taps don't reach EmulatorJS's own (scaled-up) menu; N6PhO's menu is used instead. */
+#play:not(.prestart):not(.ejs-native) #gameWrap { pointer-events: none; }
+#play:not(.prestart):not(.ejs-native) .ejs_menu_bar { display: none !important; }
+/* Emulator menu mode: the emulator fills the screen at normal size so its menus fit. */
+#play.ejs-native #screenArea { z-index: 7; overflow: visible; }
+#play.ejs-native #gameWrap {
+  position: fixed; inset: var(--sat) var(--sar) var(--sab) var(--sal);
+  width: auto !important; height: auto !important; transform: none !important; background: #000;
+}
+.ejs-done { position: fixed; z-index: 8; top: calc(var(--sat) + .5rem); right: calc(var(--sar) + .5rem); min-height: 38px; padding: .45rem 1rem; }
+.ejs-open { width: 100%; margin-top: .6rem; }
 
 #screenArea {
   position: absolute; z-index: 1;

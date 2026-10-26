@@ -81,6 +81,8 @@ const Host = (() => {
     quality = App.prefs.get('quality') || 'auto';
     qEl.value = quality;
     qEl.onchange = () => { quality = qEl.value; App.prefs.set('quality', quality); for (const c of clients.values()) c.rate = null; };
+    $('#ejsMenuBtn').onclick = () => setNative(true);
+    $('#ejsDone').onclick = () => setNative(false);
     $('#qsBtn').onclick = () => gameCall('quickSave', 'Saved.');
     $('#qlBtn').onclick = () => gameCall('quickLoad', 'Loaded.');
   }
@@ -208,6 +210,17 @@ const Host = (() => {
     const sc = Math.min(W / (w * gw), H / (h * gh));
     const tx = (W - sc * w * gw) / 2 - sc * x * gw, ty = (H - sc * h * gh) / 2 - sc * y * gh;
     box.style.transform = `translate(${tx}px, ${ty}px) scale(${sc})`;
+  }
+
+  // Emulator menu mode: show EmulatorJS full-screen and unscaled so its own menus fit the phone.
+  function setNative(on) {
+    if (on && !started) { App.toast('Start the game first.'); return; }
+    App.closeMenu();
+    $('#play').classList.toggle('ejs-native', on);
+    $('#ejsDone').hidden = !on;
+    if (on) App.toast('Tap the game to show the emulator menu.');
+    window.dispatchEvent(new Event('resize')); // let EmulatorJS resize its canvas
+    App.layout();
   }
 
   function setRenderWidth(cssW) {

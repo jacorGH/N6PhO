@@ -25,6 +25,12 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
   working. N6PhO nudges the audio back every second and on every tap. If *Game audio* shows
   anything other than "running" during a freeze, that's the cause.
 
+## Emulator menu
+During play, taps on the game don't open EmulatorJS's own menu (it would appear oversized,
+because the emulator renders in a small box that's scaled up for speed). To use it, open
+**host menu → Game → Emulator menu**: the emulator fills the screen at normal size so its settings,
+cheats and save-file import/export fit. Tap the game to show its menu bar, then **Back to N6PhO**.
+
 ## Stick and buttons
 Menu → Stick and buttons (saved per phone):
 - **Stick sensitivity:** how far you push for full tilt.
