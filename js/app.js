@@ -1,6 +1,6 @@
-// Shared helpers, browser patches and lobby wiring.
+// Shared helpers, browser patches, layout, menu and lobby wiring.
 const App = (() => {
-  const C = window.N64NP;
+  const C = window.N6;
 
   // 1) Keep WebGL frames readable so the host can capture the game canvas (Safari needs this).
   if (C.preserveDrawingBuffer) {
@@ -13,7 +13,7 @@ const App = (() => {
     };
   }
 
-  // 2) Tap the emulator's audio: anything connected to the speakers is also sent to a stream node.
+  // 2) Tap the emulator's audio: anything connected to the speakers also feeds a stream node.
   const audio = { dest: null };
   if (window.AudioNode) {
     const origConnect = AudioNode.prototype.connect;
@@ -31,7 +31,7 @@ const App = (() => {
           }
           if (d) origConnect.call(this, d);
         }
-      } catch (e) { /* audio tap is best-effort */ }
+      } catch (e) { /* best effort */ }
       return result;
     };
   }
@@ -41,14 +41,20 @@ const App = (() => {
   const clamp = (v, lo = -1, hi = 1) => Math.min(hi, Math.max(lo, v));
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-  function show(id) {
-    document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.id !== id; });
-  }
+  // ---------- Preferences ----------
+  const prefs = {
+    get(k) {
+      try { const v = localStorage.getItem('n6-' + k); if (v !== null) return JSON.parse(v); } catch (e) {}
+      return C.defaults[k];
+    },
+    set(k, v) { try { localStorage.setItem('n6-' + k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  function show(id) { document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.id !== id; }); }
   function msg(id, text) { const el = document.getElementById(id); if (el) el.textContent = text || ''; }
   function makeCode() {
     let s = '';
-    const r = crypto.getRandomValues(new Uint32Array(4));
-    for (const n of r) s += CODE_CHARS[n % CODE_CHARS.length];
+    for (const n of crypto.getRandomValues(new Uint32Array(4))) s += CODE_CHARS[n % CODE_CHARS.length];
     return s;
   }
   function peerOptions() {
@@ -58,27 +64,97 @@ const App = (() => {
   }
   function audioTrack() { return audio.dest ? audio.dest.stream.getAudioTracks()[0] || null : null; }
 
+  let toastTimer = 0;
+  function toast(text) {
+    const t = $('#toast');
+    t.textContent = text; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
+  }
+
   let wake = null;
   async function keepAwake() {
-    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not critical */ }
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && wake) keepAwake();
   });
 
-  function playerName() {
-    const v = $('#name').value.trim().slice(0, 16);
-    return v || 'Player';
+  // ---------- Layout ----------
+  // Portrait: game on top, controller deck below. Landscape: game fills, buttons float over it.
+  let aspect = 4 / 3;
+  const layoutHooks = [];
+  function setAspect(ar) { if (ar && isFinite(ar) && Math.abs(ar - aspect) > 0.001) { aspect = ar; layout(); } }
+  function onLayout(fn) { layoutHooks.push(fn); }
+
+  function layout() {
+    const play = $('#play');
+    if (play.hidden) return;
+    const W = window.innerWidth, H = window.innerHeight;
+    const land = W > H;
+    document.body.classList.toggle('land', land);
+    const skinOn = typeof Skin !== 'undefined' && Skin.active();
+    play.classList.toggle('noskin', !skinOn);
+    $('#menuFab').hidden = skinOn;
+    document.documentElement.style.setProperty('--screen-h', `${Math.round(Math.min(W / aspect, H * 0.55))}px`);
+    document.documentElement.style.setProperty('--skin-alpha', prefs.get('alpha'));
+    requestAnimationFrame(() => {
+      if (typeof Skin !== 'undefined') Skin.relayout();
+      layoutHooks.forEach((fn) => fn());
+    });
+  }
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', () => setTimeout(layout, 250));
+
+  // ---------- Menu sheet ----------
+  let leaveHandler = null;
+  function openMenu() { $('#sheet').hidden = false; }
+  function closeMenu() { $('#sheet').hidden = true; }
+
+  function enterPlay(role, { onLeave } = {}) {
+    document.body.dataset.role = role;
+    leaveHandler = onLeave;
+    $('#leaveBtn').textContent = role === 'host' ? 'Close room' : 'Leave room';
+    show('play');
+    layout();
   }
 
+  function wireMenu() {
+    $('#menuFab').addEventListener('click', openMenu);
+    $('#sheetClose').addEventListener('click', closeMenu);
+    $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') closeMenu(); });
+
+    const skinEl = $('#optSkin'), hapEl = $('#optHaptics'), alphaEl = $('#optAlpha');
+    skinEl.checked = prefs.get('skin');
+    hapEl.checked = prefs.get('haptics');
+    alphaEl.value = prefs.get('alpha');
+    skinEl.addEventListener('change', () => { prefs.set('skin', skinEl.checked); Skin.setVisible(skinEl.checked); });
+    hapEl.addEventListener('change', () => { prefs.set('haptics', hapEl.checked); if (hapEl.checked) Haptics.tick(); });
+    alphaEl.addEventListener('input', () => { prefs.set('alpha', +alphaEl.value); document.documentElement.style.setProperty('--skin-alpha', alphaEl.value); });
+
+    $('#leaveBtn').addEventListener('click', () => {
+      if (leaveHandler) leaveHandler();
+      location.href = location.pathname;
+    });
+
+    window.addEventListener('gamepadconnected', () => {
+      if (!Skin.isMounted() || !Skin.active()) return;
+      Skin.setVisible(false);
+      skinEl.checked = false;
+      toast('Controller connected. Touch controls hidden (turn them back on in the menu).');
+    });
+  }
+
+  function playerName() { return $('#name').value.trim().slice(0, 16) || 'Player'; }
+
+  // ---------- Lobby ----------
   function init() {
     const nameEl = $('#name'), codeEl = $('#code'), romEl = $('#rom');
-    try { nameEl.value = localStorage.getItem('fp-name') || ''; } catch (e) {}
-    nameEl.addEventListener('change', () => { try { localStorage.setItem('fp-name', nameEl.value.trim()); } catch (e) {} });
+    nameEl.value = prefs.get('name') || '';
+    nameEl.addEventListener('change', () => prefs.set('name', nameEl.value.trim()));
 
     const room = new URLSearchParams(location.search).get('room');
     if (room) codeEl.value = room.toUpperCase().slice(0, 4);
-
     codeEl.addEventListener('input', () => {
       codeEl.value = codeEl.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     });
@@ -107,8 +183,11 @@ const App = (() => {
     };
     $('#joinBtn').addEventListener('click', () => join('player'));
     $('#watchBtn').addEventListener('click', () => join('spectator'));
+
+    wireMenu();
   }
   window.addEventListener('DOMContentLoaded', init);
 
-  return { $, esc, clamp, show, msg, makeCode, peerOptions, audioTrack, keepAwake };
+  return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake,
+    layout, setAspect, onLayout, enterPlay, openMenu, closeMenu };
 })();

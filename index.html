@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#3d4046">
-<title>Four Ports</title>
+<title>N6PhO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
@@ -16,8 +17,8 @@
 <!-- Lobby -->
 <main id="lobby" class="screen">
   <header class="brand">
-    <h1>Four Ports</h1>
-    <p>N64 netplay for up to four players, plus anyone who wants to watch.</p>
+    <h1>N6PhO</h1>
+    <p>N64 netplay on your phone. Four players, plus anyone who wants to watch.</p>
   </header>
 
   <div class="sockets" aria-hidden="true">
@@ -58,78 +59,79 @@
   <p id="lobbyMsg" class="msg" role="status"></p>
 </main>
 
-<!-- Host -->
-<section id="hostScreen" class="screen" hidden>
-  <div id="gameWrap"><div id="game"></div></div>
-  <aside class="host-bar">
-    <div class="room">
-      <div>
-        <span class="dim small">Room code</span>
-        <strong id="roomCode">----</strong>
-      </div>
-      <button id="inviteBtn" class="btn small">Share invite</button>
-    </div>
-    <ol id="portList" class="port-list"></ol>
-    <h3>Watching</h3>
-    <ul id="specList" class="spec-list"></ul>
-    <p id="hostMsg" class="msg" role="status">Tap the play button on the game to start. Guests can join any time.</p>
-  </aside>
-</section>
-
-<!-- Guest / spectator -->
-<section id="guestScreen" class="screen" hidden>
-  <div id="stage">
-    <div id="crop"><video id="remote" playsinline autoplay muted></video></div>
-    <p id="waiting">Waiting for the host to start the game…</p>
+<!-- Play screen (host and guests) -->
+<section id="play" class="screen" hidden>
+  <div id="screenArea">
+    <div id="gameWrap" data-for="host"><div id="game"></div></div>
+    <div id="crop" data-for="guest"><video id="remote" playsinline autoplay muted></video></div>
+    <p id="waiting" data-for="guest">Waiting for the host to start the game…</p>
   </div>
 
-  <div class="hud">
-    <span id="myPort" class="pill">Watching</span>
-    <span id="myPing" class="pill">– ms</span>
-    <select id="view" class="pill" aria-label="View">
-      <option value="full">Full screen</option>
-      <option value="top">Top half</option>
-      <option value="bottom">Bottom half</option>
-      <option value="left">Left half</option>
-      <option value="right">Right half</option>
-      <option value="q1">Top-left quarter</option>
-      <option value="q2">Top-right quarter</option>
-      <option value="q3">Bottom-left quarter</option>
-      <option value="q4">Bottom-right quarter</option>
-    </select>
-    <button id="soundBtn" class="pill btn-pill">Turn sound on</button>
-    <button id="padBtn" class="pill btn-pill" hidden>Hide touch pad</button>
-    <button id="leaveBtn" class="pill btn-pill">Leave</button>
-  </div>
+  <div id="skin" class="skin" hidden></div>
+
+  <div id="badge" class="badge"></div>
+  <button id="menuFab" class="fab" aria-label="Open menu" hidden><span class="bars"></span></button>
   <p id="toast" class="toast" role="status" hidden></p>
 
-  <div id="touchPad" class="pad" hidden>
-    <div class="pad-left">
-      <div class="shoulders">
-        <button data-btn="L" class="tb shoulder">L</button>
-        <button data-btn="Z" class="tb shoulder">Z</button>
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-card" role="dialog" aria-label="Menu">
+      <div class="sheet-head">
+        <div>
+          <span class="dim small">Room</span>
+          <strong id="sheetCode">----</strong>
+        </div>
+        <button id="sheetClose" class="btn small">Done</button>
       </div>
-      <div id="stick" class="stick"><div class="knob"></div></div>
-    </div>
-    <button data-btn="START" class="tb start">Start</button>
-    <div class="pad-right">
-      <button data-btn="R" class="tb shoulder rs">R</button>
-      <div class="cbtns">
-        <button data-btn="CUP" class="tb c u" aria-label="C up">▲</button>
-        <button data-btn="CLEFT" class="tb c l" aria-label="C left">◀</button>
-        <button data-btn="CRIGHT" class="tb c r" aria-label="C right">▶</button>
-        <button data-btn="CDOWN" class="tb c d" aria-label="C down">▼</button>
-      </div>
-      <button data-btn="B" class="tb face b">B</button>
-      <button data-btn="A" class="tb face a">A</button>
+
+      <section data-for="host">
+        <button id="inviteBtn" class="btn small">Share invite</button>
+        <h3>Players</h3>
+        <ol id="portList" class="port-list"></ol>
+        <h3>Watching</h3>
+        <ul id="specList" class="spec-list"></ul>
+        <h3>Game</h3>
+        <div class="row">
+          <button id="qsBtn" class="btn small">Quick save</button>
+          <button id="qlBtn" class="btn small">Quick load</button>
+        </div>
+      </section>
+
+      <section data-for="guest">
+        <h3>View</h3>
+        <select id="view" aria-label="View">
+          <option value="full">Full screen</option>
+          <option value="top">Top half (2 players)</option>
+          <option value="bottom">Bottom half (2 players)</option>
+          <option value="left">Left half</option>
+          <option value="right">Right half</option>
+          <option value="q1">Top-left quarter</option>
+          <option value="q2">Top-right quarter</option>
+          <option value="q3">Bottom-left quarter</option>
+          <option value="q4">Bottom-right quarter</option>
+        </select>
+        <button id="soundBtn" class="btn small sound">Turn sound on</button>
+      </section>
+
+      <section>
+        <h3>Controls</h3>
+        <label class="toggle"><span>Touch controls</span><input type="checkbox" id="optSkin"></label>
+        <label class="toggle"><span>Vibrate on press</span><input type="checkbox" id="optHaptics"></label>
+        <label class="field slider">
+          <span>Landscape button opacity</span>
+          <input type="range" id="optAlpha" min="0.15" max="1" step="0.05">
+        </label>
+      </section>
+
+      <button id="leaveBtn" class="btn ghost leave">Leave room</button>
     </div>
   </div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="js/config.js"></script>
+<script src="js/skin-n64.js"></script>
 <script src="js/app.js"></script>
-<script src="js/input.js"></script>
+<script src="js/skin.js"></script>
 <script src="js/host.js"></script>
 <script src="js/guest.js"></script>
 </body>

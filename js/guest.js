@@ -1,8 +1,8 @@
 // Guest / spectator: receives the host's stream, sends inputs when seated in a port.
 const Guest = (() => {
-  const C = window.N64NP;
-  const { $, msg } = App;
-  let peer = null, conn = null, call = null, slot = null, joined = false, toastTimer = 0;
+  const C = window.N6;
+  const { $, esc } = App;
+  let peer = null, conn = null, call = null, slot = null, joined = false, lastRoster = null;
 
   const CROPS = {
     full: [0, 0, 1, 1], top: [0, 0, 1, 0.5], bottom: [0, 0.5, 1, 0.5],
@@ -13,12 +13,12 @@ const Guest = (() => {
   function join(code, name, role) {
     peer = new Peer(App.peerOptions());
     const timeout = setTimeout(() => {
-      if (!joined) { msg('lobbyMsg', 'The room didn’t answer. Check the code and that the host’s screen is still open.'); cleanup(); }
+      if (!joined) { App.msg('lobbyMsg', 'The room didn’t answer. Check the code and that the host’s screen is still open.'); cleanup(); }
     }, 15000);
 
     peer.on('open', () => {
       conn = peer.connect(C.peerPrefix + code, { metadata: { name, role } });
-      conn.on('open', () => { joined = true; clearTimeout(timeout); enter(); });
+      conn.on('open', () => { joined = true; clearTimeout(timeout); enter(code); });
       conn.on('data', onData);
       conn.on('close', () => ended('The host closed the room.'));
     });
@@ -31,32 +31,31 @@ const Guest = (() => {
     peer.on('error', (err) => {
       if (err.type === 'peer-unavailable') {
         clearTimeout(timeout);
-        msg('lobbyMsg', `No room found with code ${code}.`);
+        App.msg('lobbyMsg', `No room found with code ${code}.`);
         cleanup();
       } else if (!joined) {
-        msg('lobbyMsg', `Connection problem: ${err.type || err.message}.`);
+        App.msg('lobbyMsg', `Connection problem: ${err.type || err.message}.`);
       } else {
-        toast(`Connection problem: ${err.type || err.message}`);
+        App.toast(`Connection problem: ${err.type || err.message}`);
       }
     });
   }
 
-  function enter() {
-    App.show('guestScreen');
+  function enter(code) {
+    App.enterPlay('guest', { onLeave: cleanup });
+    $('#sheetCode').textContent = code;
     const view = $('#view');
-    try { view.value = localStorage.getItem('fp-view') || 'full'; } catch (e) {}
-    view.onchange = () => { try { localStorage.setItem('fp-view', view.value); } catch (e) {} layout(); };
-    window.addEventListener('resize', layout);
-    $('#remote').addEventListener('resize', layout);
-    $('#remote').addEventListener('loadedmetadata', layout);
+    view.value = App.prefs.get('view') || 'full';
+    view.onchange = () => { App.prefs.set('view', view.value); updateAspect(); };
+    const v = $('#remote');
+    v.addEventListener('resize', updateAspect);
+    v.addEventListener('loadedmetadata', updateAspect);
     $('#soundBtn').onclick = () => {
-      const v = $('#remote'); v.muted = false; v.play().catch(() => {});
+      v.muted = false; v.play().catch(() => {});
       $('#soundBtn').hidden = true;
     };
-    $('#padBtn').onclick = () => setPad($('#touchPad').hidden);
-    $('#leaveBtn').onclick = () => { cleanup(); location.href = location.pathname; };
-    window.addEventListener('gamepadconnected', () => { if (slot != null) { setPad(false); toast('Controller connected'); } });
-    layout();
+    App.onLayout(layoutCrop);
+    updateAspect();
   }
 
   function attach(s) {
@@ -64,51 +63,50 @@ const Guest = (() => {
     v.srcObject = s;
     v.play().catch(() => {});
     $('#waiting').hidden = true;
-    layout();
+    if (v.muted && !$('#soundBtn').hidden) App.toast('Open the menu and tap “Turn sound on” for audio.');
+    updateAspect();
   }
 
   function onData(d) {
     if (!d || typeof d !== 'object') return;
     if (d.t === 'ping') { send({ t: 'pong', ts: d.ts }); if (d.roster) roster(d.roster); }
     else if (d.t === 'roster') roster(d);
-    else if (d.t === 'note') toast(d.text);
+    else if (d.t === 'note') App.toast(d.text);
     else if (d.t === 'kick') ended('The host removed you from the room.');
   }
 
   function roster(r) {
-    const pill = $('#myPort');
-    pill.className = 'pill' + (r.you != null ? ` p${r.you + 1}` : '');
-    pill.textContent = r.you != null ? `Port ${r.you + 1}` : 'Watching';
-    $('#myPing').textContent = r.rtt != null ? `${r.rtt} ms` : '– ms';
+    lastRoster = r;
+    const port = r.you != null ? r.you + 1 : null;
+    $('#badge').innerHTML = (port ? `<span class="dot p${port}"></span><span>Port ${port}</span>` : '<span>Watching</span>')
+      + `<span class="dim">${r.rtt != null ? r.rtt + ' ms' : '– ms'}</span>`;
     if (!r.started) $('#waiting').hidden = false;
 
     const nowSlot = r.you != null ? r.you : null;
     if (nowSlot === slot) return;
     slot = nowSlot;
     if (slot != null) {
-      Input.start($('#touchPad'), send);
-      $('#padBtn').hidden = false;
-      const hasPad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].some(Boolean);
-      setPad(!hasPad && matchMedia('(pointer: coarse)').matches);
-      toast(`You’re on port ${slot + 1}.`);
+      Skin.mount($('#skin'), { onState: send, onMenu: App.openMenu, gamepad: true });
+      App.toast(`You’re on port ${slot + 1}.`);
     } else {
-      Input.stop();
-      setPad(false);
-      $('#padBtn').hidden = true;
+      Skin.unmount();
     }
   }
 
-  function setPad(on) {
-    $('#touchPad').hidden = !on;
-    $('#padBtn').textContent = on ? 'Hide touch pad' : 'Show touch pad';
+  // Cropped view: the screen area takes the aspect of the crop, then the video is offset inside it.
+  function cropRect() { return CROPS[$('#view').value] || CROPS.full; }
+  function updateAspect() {
+    const v = $('#remote');
+    const [, , cw, ch] = cropRect();
+    App.setAspect(((v.videoWidth || 4) * cw) / ((v.videoHeight || 3) * ch));
+    App.layout();
   }
-
-  function layout() {
-    const [cx, cy, cw, ch] = CROPS[$('#view').value] || CROPS.full;
-    const v = $('#remote'), stage = $('#stage'), crop = $('#crop');
-    const vw = v.videoWidth || 4, vh = v.videoHeight || 3;
-    const ar = (vw * cw) / (vh * ch);
-    const W = stage.clientWidth, H = stage.clientHeight;
+  function layoutCrop() {
+    if (document.body.dataset.role !== 'guest') return;
+    const [cx, cy, cw, ch] = cropRect();
+    const v = $('#remote'), area = $('#screenArea'), crop = $('#crop');
+    const ar = ((v.videoWidth || 4) * cw) / ((v.videoHeight || 3) * ch);
+    const W = area.clientWidth, H = area.clientHeight;
     let w = W, h = W / ar;
     if (h > H) { h = H; w = H * ar; }
     crop.style.width = `${w}px`;
@@ -121,21 +119,14 @@ const Guest = (() => {
 
   function send(m) { try { if (conn && conn.open) conn.send(m); } catch (e) {} }
 
-  function toast(text) {
-    const t = $('#toast');
-    t.textContent = text; t.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
-  }
-
   function ended(text) {
     if (!joined) return;
     joined = false;
-    Input.stop();
+    Skin.unmount();
     slot = null;
     cleanup();
     App.show('lobby');
-    msg('lobbyMsg', text);
+    App.msg('lobbyMsg', text);
   }
 
   function cleanup() {

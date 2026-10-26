@@ -1,52 +1,50 @@
-# Four Ports
+# N6PhO
 
-N64 netplay in the browser for up to 4 players plus spectators, built on
-EmulatorJS (mupen64plus_next core) and PeerJS. This is the Phase 1 feasibility
-build: it answers "does Conker/GoldenEye run well enough, and does the
-connection hold up between our homes?"
+N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
+(mupen64plus_next core) and PeerJS, with a Delta-style touch controller.
 
 ## How it works
-- **The host's phone runs the game.** It streams video + audio to every guest
-  over WebRTC (PeerJS media calls). Only the host needs the ROM.
-- **Guests send only their controller input** back over a PeerJS data channel.
-  The host injects it into ports 2–4 with EmulatorJS `simulateInput`.
-- **Spectators** get the stream without a port. The host can move people between
-  watching and playing at any time.
-- No game state is synced between devices, so iPhone vs Android can't desync.
+- **The host's phone runs the game** and streams video + audio to everyone over WebRTC.
+  Only the host needs the ROM.
+- **Guests send only controller input** back; the host feeds it into ports 2–4.
+- **Spectators** watch without a port. The host can move people between watching and playing.
+
+## Touch controller
+- **Portrait:** game on top, full controller deck below. On tall phones the controls lift
+  toward your thumbs.
+- **Landscape:** game fills the screen and translucent buttons float over it
+  (opacity is adjustable in the menu).
+- **Slide between buttons:** keep your thumb down and slide from A to B, or around the
+  C buttons and D-pad (diagonals work).
+- **Forgiving hit areas:** touches just outside a button still count.
+- **Haptics:** a tick on every press. Android uses vibration; iPhone uses a Safari system-haptic
+  trick that works on recent iOS but isn't guaranteed.
+- **Controller connected?** Touch controls hide themselves; turn them back on in the menu.
+- The host plays port 1 with the same touch controller (EmulatorJS's own pad is hidden).
+  The host's Bluetooth controller is still handled by EmulatorJS.
+
+## Menu (☰ on the controller)
+- **Host:** room code + share invite, player ports, spectators, quick save / quick load, close room.
+- **Guests:** split-screen view crop, sound on, leave room.
+- **Everyone:** touch controls on/off, vibration on/off, landscape button opacity.
+
+## Skins are data
+`js/skin-n64.js` defines every button's position and size for portrait and landscape.
+Units: portrait 1u = 1% of screen width, landscape 1u = 1% of screen height. Each item has an
+`anchor` (`tl`, `tc`, `tr`, `bl`, `bc`, `br`) and x/y measured from that corner.
+Add a new skin by copying the file, changing the name, and setting `skin` in `js/config.js`.
 
 ## Setup
 1. Push this folder to a GitHub repo and turn on GitHub Pages (Settings → Pages → main / root).
-2. Open the Pages URL. It needs HTTPS, which Pages provides.
-
-## Playing
-- **Host:** enter your name, choose your ROM (`.z64 / .n64 / .v64 / .zip`), tap **Open room**,
-  then tap the play button on the game. Share the invite link or the 4-letter code.
-  You play on port 1 using EmulatorJS's own touch controls or a controller.
-- **Guest:** open the link (code auto-fills), tap **Join as player** or **Watch**.
-  Tap **Turn sound on** once the picture arrives (browsers block audio until you tap).
-- **Split-screen crop:** pick *Top half* / *Bottom half* (2-player) or a quarter (3–4 player)
-  from the view menu so you only see your own screen. The choice is remembered.
-- **Controllers:** any Bluetooth Xbox/PlayStation/MFi pad works for guests. Right stick = C buttons.
-  The touch pad hides itself automatically when a controller connects.
-
-## Phase 1 test checklist
-- [ ] GoldenEye and Conker run at full speed on the host phone (try each phone as host).
-- [ ] Guest in another home connects and sees the stream.
-- [ ] Guest inputs control port 2 (check A, B, Z, C buttons, stick in the Controller Pak/options screen).
-- [ ] Playable latency (ping is shown on the host list and the guest HUD).
-- [ ] 3–4 players + a spectator: host upload holds up.
+2. Open the Pages URL on both phones. Add it to the home screen for full-screen play.
 
 ## Tuning (js/config.js)
-- **Wrong button?** Fix the number in `n64` (the ids are libretro RetroPad ids).
+- **Wrong button?** Fix the number in `n64` (libretro RetroPad ids).
 - **Can't connect from another home?** Add your own TURN server to `iceServers`.
-  PeerJS's default free relay is shared and can be slow or full.
-- **Stream choppy?** Lower `videoBitrate` (host uploads one stream per guest:
-  2 Mbps × 4 guests = 8 Mbps upload) or `streamFps` to 30.
-- **Guest controller layout:** edit `gamepadButtons`.
+- **Stream choppy?** Lower `videoBitrate` (host uploads one stream per guest) or `streamFps`.
+- **Touch feel:** `hitPad` (extra touch area) and `stickRange` (how far to push for full tilt).
 
 ## Known limits
-- Host must keep the app in the foreground and the screen on (a wake lock is requested).
-- Expect roughly 80–200 ms of stream delay depending on networks; fine for co-op and
-  casual multiplayer, not ideal for twitch shooting.
-- Touch pad has no D-pad yet (neither game needs it in play).
+- Host must keep the app open with the screen on (a wake lock is requested).
+- Expect roughly 80–200 ms of stream delay for guests.
 - Use ROMs you dumped from cartridges you own.

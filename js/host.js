@@ -1,10 +1,11 @@
-// Host: runs EmulatorJS, streams video + audio to every guest, applies remote players' inputs.
+// Host: runs EmulatorJS, streams video + audio to every guest, applies all players' inputs.
 const Host = (() => {
-  const C = window.N64NP;
-  const { $, esc, msg } = App;
+  const C = window.N6;
+  const { $, esc } = App;
   let peer = null, code = '', hostName = 'Host', stream = null, started = false, pingTimer = 0, romFile = null;
-  const clients = new Map();           // peerId -> client
-  const ports = [null, null, null, null]; // index 0 is always the host
+  const clients = new Map();               // peerId -> client
+  const ports = [null, null, null, null];  // index 0 is always the host
+  const local = { slot: 0, last: new Map() }; // the host's own touch controls -> port 1
 
   function open(file, name) {
     romFile = file;
@@ -13,28 +14,39 @@ const Host = (() => {
     peer = new Peer(C.peerPrefix + code, App.peerOptions());
 
     peer.on('open', () => {
-      App.show('hostScreen');
-      $('#roomCode').textContent = code;
+      App.enterPlay('host', { onLeave: close });
+      $('#sheetCode').textContent = code;
+      Skin.mount($('#skin'), { onState: (s) => applyInput(local, s), onMenu: App.openMenu, gamepad: false });
       render();
+      badge();
       loadEmulator(romFile);
       if (!pingTimer) pingTimer = setInterval(pingAll, 2000);
+      App.toast(`Room ${code} is open. Tap play on the game to start.`);
     });
     peer.on('connection', (conn) => conn.on('open', () => onJoin(conn)));
     peer.on('disconnected', () => {
-      msg('hostMsg', 'Lost contact with the room server. Reconnecting… (players already connected stay connected)');
+      App.toast('Lost the room server. Reconnecting… (connected players stay connected)');
       try { peer.reconnect(); } catch (e) {}
     });
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id') { peer.destroy(); open(romFile, hostName); return; }
-      if (err.type === 'peer-unavailable') return; // a guest left mid-handshake
+      if (err.type === 'peer-unavailable') return;
       const text = `Connection problem: ${err.type || err.message}.`;
-      msg('hostMsg', text); msg('lobbyMsg', text);
+      App.msg('lobbyMsg', text);
+      if (!$('#play').hidden) App.toast(text);
       $('#hostBtn').disabled = false;
     });
 
     $('#inviteBtn').onclick = invite;
     $('#portList').onclick = onAction;
     $('#specList').onclick = onAction;
+    $('#qsBtn').onclick = () => gameCall('quickSave', 'Saved.');
+    $('#qlBtn').onclick = () => gameCall('quickLoad', 'Loaded.');
+  }
+
+  function close() {
+    for (const c of clients.values()) send(c, { t: 'note', text: 'The host closed the room.' });
+    try { peer.destroy(); } catch (e) {}
   }
 
   // ---------- Emulator ----------
@@ -48,24 +60,27 @@ const Host = (() => {
     window.EJS_onGameStart = onGameStart;
     const s = document.createElement('script');
     s.src = C.ejsData + 'loader.js';
-    s.onerror = () => msg('hostMsg', 'Could not load the emulator. Check your internet connection and reload.');
+    s.onerror = () => App.toast('Could not load the emulator. Check your connection and reload.');
     document.body.appendChild(s);
+  }
+
+  function gm() { return window.EJS_emulator && window.EJS_emulator.gameManager; }
+  function sim(player, id, value) { const g = gm(); if (g && g.simulateInput) g.simulateInput(player, id, value); }
+  function gameCall(fn, done) {
+    const g = gm();
+    if (!started || !g || typeof g[fn] !== 'function') { App.toast('Start the game first.'); return; }
+    try { g[fn](1); App.toast(done); App.closeMenu(); } catch (e) { App.toast('That didn’t work in this build.'); }
   }
 
   function emuCanvas() {
     return (window.EJS_emulator && window.EJS_emulator.canvas) || document.querySelector('#game canvas');
   }
 
-  function sim(player, id, value) {
-    const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
-    if (gm && gm.simulateInput) gm.simulateInput(player, id, value);
-  }
-
   function onGameStart() {
     started = true;
     const canvas = emuCanvas();
     if (!canvas || !canvas.captureStream) {
-      msg('hostMsg', 'This browser cannot stream the game canvas. Try hosting from a different browser.');
+      App.toast('This browser cannot stream the game. Try hosting from the other phone.');
       return;
     }
     stream = canvas.captureStream(C.streamFps);
@@ -73,11 +88,9 @@ const Host = (() => {
     if (v && 'contentHint' in v) v.contentHint = 'motion';
     attachAudio(0);
     for (const c of clients.values()) callClient(c);
-    msg('hostMsg', 'Game running. Everyone in the room is getting the stream.');
     broadcast();
   }
 
-  // Audio starts a moment after the game; once it exists, add it and re-call guests so they get sound.
   function attachAudio(tries) {
     const a = App.audioTrack();
     if (a) {
@@ -114,11 +127,7 @@ const Host = (() => {
   // ---------- Guests ----------
   function onJoin(conn) {
     const meta = conn.metadata || {};
-    const c = {
-      id: conn.peer, conn,
-      name: String(meta.name || 'Guest').slice(0, 16),
-      slot: null, rtt: null, call: null, last: new Map()
-    };
+    const c = { id: conn.peer, conn, name: String(meta.name || 'Guest').slice(0, 16), slot: null, rtt: null, call: null, last: new Map() };
     clients.set(c.id, c);
     if (meta.role === 'player') {
       const s = freeSlot();
@@ -129,15 +138,14 @@ const Host = (() => {
     conn.on('close', () => drop(c));
     conn.on('error', () => drop(c));
     if (started) callClient(c);
+    App.toast(`${c.name} joined${c.slot != null ? ` on port ${c.slot + 1}` : ' to watch'}.`);
     broadcast();
   }
 
   function onData(c, d) {
     if (!d || typeof d !== 'object') return;
     if (d.t === 'in') applyInput(c, d);
-    else if (d.t === 'pong' && typeof d.ts === 'number') {
-      c.rtt = Math.round(performance.now() - d.ts);
-    }
+    else if (d.t === 'pong' && typeof d.ts === 'number') c.rtt = Math.round(performance.now() - d.ts);
   }
 
   function applyInput(c, d) {
@@ -173,6 +181,7 @@ const Host = (() => {
     unseat(c);
     try { if (c.call) c.call.close(); } catch (e) {}
     clients.delete(c.id);
+    App.toast(`${c.name} left.`);
     broadcast();
   }
 
@@ -181,6 +190,7 @@ const Host = (() => {
   function rosterFor(c) {
     return {
       t: 'roster',
+      code,
       ports: ports.map((p, i) => (i === 0 ? hostName : p ? p.name : null)),
       you: c.slot,
       watching: [...clients.values()].filter((x) => x.slot == null).length,
@@ -192,9 +202,9 @@ const Host = (() => {
   function broadcast() {
     for (const c of clients.values()) send(c, rosterFor(c));
     render();
+    badge();
   }
 
-  // Ping doubles as a roster refresh so a dropped message never leaves a guest out of date.
   function pingAll() {
     const ts = performance.now();
     for (const c of clients.values()) send(c, { t: 'ping', ts, roster: rosterFor(c) });
@@ -202,16 +212,18 @@ const Host = (() => {
   }
 
   // ---------- Host UI ----------
+  function badge() {
+    const players = 1 + ports.filter((p, i) => i > 0 && p).length;
+    const watching = [...clients.values()].filter((c) => c.slot == null).length;
+    $('#badge').innerHTML = `<span class="dot p1"></span><span>Room ${esc(code)}</span><span class="dim">${players}P${watching ? ` +${watching} watching` : ''}</span>`;
+  }
+
   function render() {
     $('#portList').innerHTML = [0, 1, 2, 3].map((i) => {
       const n = i + 1;
-      if (i === 0) {
-        return `<li class="port p1"><span class="n">1</span><span class="who">${esc(hostName)}<small>You, hosting</small></span></li>`;
-      }
+      if (i === 0) return `<li class="port p1"><span class="n">1</span><span class="who">${esc(hostName)}<small>You, hosting</small></span></li>`;
       const p = ports[i];
-      if (!p) {
-        return `<li class="port p${n} open"><span class="n">${n}</span><span class="who">Open<small>Waiting for a player</small></span></li>`;
-      }
+      if (!p) return `<li class="port p${n} open"><span class="n">${n}</span><span class="who">Open<small>Waiting for a player</small></span></li>`;
       return `<li class="port p${n}"><span class="n">${n}</span>
         <span class="who">${esc(p.name)}<small>${p.rtt != null ? p.rtt + ' ms' : 'Connecting…'}</small></span>
         <span class="acts">
@@ -228,7 +240,7 @@ const Host = (() => {
             ${open ? `<button class="btn small" data-act="seat" data-id="${esc(c.id)}">Give a port</button>` : ''}
             <button class="btn small ghost" data-act="kick" data-id="${esc(c.id)}">Remove</button>
           </span></li>`).join('')
-      : '<li class="dim small">No one is watching yet.</li>';
+      : '<li class="dim small empty">No one is watching yet.</li>';
   }
 
   function onAction(e) {
@@ -248,12 +260,12 @@ const Host = (() => {
   async function invite() {
     const url = `${location.origin}${location.pathname}?room=${code}`;
     try {
-      if (navigator.share) { await navigator.share({ title: 'Four Ports', text: `Join my N64 room: ${code}`, url }); return; }
+      if (navigator.share) { await navigator.share({ title: 'N6PhO', text: `Join my N6PhO room: ${code}`, url }); return; }
       await navigator.clipboard.writeText(url);
-      msg('hostMsg', 'Invite link copied.');
+      App.toast('Invite link copied.');
     } catch (e) {
       if (e && e.name === 'AbortError') return;
-      msg('hostMsg', `Room code: ${code}. Link: ${url}`);
+      App.toast(`Room code ${code}`);
     }
   }
 
