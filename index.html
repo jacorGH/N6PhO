@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#3d4046">
 <title>N6PhO</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/icon-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
@@ -17,6 +20,7 @@
 <!-- Lobby -->
 <main id="lobby" class="screen">
   <header class="brand">
+    <img class="brand-icon" src="icons/icon-192.png" alt="" width="84" height="84">
     <h1>N6PhO</h1>
     <p>N64 netplay on your phone. Four players, plus anyone who wants to watch.</p>
   </header>
@@ -61,8 +65,9 @@
 
 <!-- Play screen (host and guests) -->
 <section id="play" class="screen" hidden>
+  <div id="gameWrap" data-for="host"><div id="game"></div></div>
   <div id="screenArea">
-    <div id="gameWrap" data-for="host"><div id="game"></div></div>
+    <canvas id="hostView" data-for="host" hidden></canvas>
     <div id="crop" data-for="guest"><video id="remote" playsinline autoplay muted></video></div>
     <p id="waiting" data-for="guest">Waiting for the host to start the game…</p>
   </div>
@@ -89,6 +94,14 @@
         <ol id="portList" class="port-list"></ol>
         <h3>Watching</h3>
         <ul id="specList" class="spec-list"></ul>
+        <h3>Screens</h3>
+        <label class="toggle"><span>Private screens</span><input type="checkbox" id="optPrivate"></label>
+        <select id="splitSel" aria-label="Split-screen layout">
+          <option value="tb">2 players: top / bottom</option>
+          <option value="lr">2 players: left / right</option>
+          <option value="quad">3–4 players: quarters</option>
+        </select>
+        <p class="dim small note">Each player sees only their own view, including you. Turn it on when the match starts and off for menus. Spectators always see the whole game.</p>
         <h3>Game</h3>
         <div class="row">
           <button id="qsBtn" class="btn small">Quick save</button>
@@ -97,23 +110,20 @@
       </section>
 
       <section data-for="guest">
-        <h3>View</h3>
-        <select id="view" aria-label="View">
-          <option value="full">Full screen</option>
-          <option value="top">Top half (2 players)</option>
-          <option value="bottom">Bottom half (2 players)</option>
-          <option value="left">Left half</option>
-          <option value="right">Right half</option>
-          <option value="q1">Top-left quarter</option>
-          <option value="q2">Top-right quarter</option>
-          <option value="q3">Bottom-left quarter</option>
-          <option value="q4">Bottom-right quarter</option>
-        </select>
+        <p id="screenNote" class="dim small">You’ll see the whole game until the host turns on private screens.</p>
         <button id="soundBtn" class="btn small sound">Turn sound on</button>
       </section>
 
       <section>
         <h3>Controls</h3>
+        <label class="field">
+          <span>Controller skin</span>
+          <select id="skinSel"></select>
+        </label>
+        <div class="row">
+          <label class="btn small file">Import Delta skin<input id="skinFile" type="file"></label>
+          <button id="skinDel" class="btn small ghost" hidden>Delete this skin</button>
+        </div>
         <label class="toggle"><span>Touch controls</span><input type="checkbox" id="optSkin"></label>
         <label class="toggle"><span>Vibrate on press</span><input type="checkbox" id="optHaptics"></label>
         <label class="field slider">
@@ -132,6 +142,7 @@
 <script src="js/skin-n64.js"></script>
 <script src="js/app.js"></script>
 <script src="js/skin.js"></script>
+<script src="js/deltaskin.js"></script>
 <script src="js/host.js"></script>
 <script src="js/guest.js"></script>
 </body>

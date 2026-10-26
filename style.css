@@ -48,6 +48,7 @@ p { margin: 0 0 .75rem; }
   margin: 0 auto;
   padding: calc(var(--sat) + 2rem) calc(var(--sar) + 1.25rem) calc(var(--sab) + 2rem) calc(var(--sal) + 1.25rem);
 }
+.brand-icon { display: block; width: 84px; height: 84px; border-radius: 20px; margin-bottom: 1rem; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
 .brand h1 { font-size: clamp(3rem, 15vw, 5rem); font-weight: 900; letter-spacing: -.01em; line-height: .9; margin-bottom: .6rem; }
 .brand p { color: var(--ink-dim); max-width: 32ch; }
 
@@ -103,21 +104,31 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
 #play { position: fixed; inset: 0; background: #000; overflow: hidden; }
 
 /* Portrait: game on top, controller deck fills the rest */
+/* Host: the emulator runs in a fixed 4:3 box underneath; what you see is drawn on top */
+#gameWrap {
+  position: absolute; z-index: 0;
+  top: var(--sat); left: 50%; transform: translateX(-50%);
+  width: min(100vw, calc((100vh - var(--sat) - var(--sab)) * 4 / 3));
+  aspect-ratio: 4 / 3;
+}
+#play.prestart #screenArea { background: transparent; pointer-events: none; }
+#hostView { display: block; width: 100%; height: 100%; }
+
 #screenArea {
-  position: absolute;
+  position: absolute; z-index: 1;
   top: var(--sat); left: var(--sal); right: var(--sar);
   height: var(--screen-h);
   display: grid; place-items: center;
   background: #000;
 }
-#gameWrap { width: 100%; height: 100%; }
 #game { width: 100%; height: 100%; }
+body.skin-under #screenArea { z-index: 3; }
 #crop { position: relative; overflow: hidden; }
-#remote { position: absolute; object-fit: fill; background: #000; }
+#remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; background: #000; }
 #waiting { position: absolute; margin: 0; padding: 1rem; color: var(--ink-dim); text-align: center; }
 
 .skin {
-  position: absolute;
+  position: absolute; z-index: 2; pointer-events: none;
   top: calc(var(--sat) + var(--screen-h)); bottom: 0; left: 0; right: 0;
   padding-bottom: var(--sab);
   background:
@@ -131,9 +142,18 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
 body.land #screenArea { top: var(--sat); bottom: var(--sab); height: auto; }
 body.land .skin {
   top: var(--sat); bottom: var(--sab); left: var(--sal); right: var(--sar);
-  padding: 0; background: none; pointer-events: none; opacity: var(--skin-alpha);
+  padding: 0; background: none; opacity: var(--skin-alpha);
 }
-body.land .skin .sk-item { pointer-events: auto; }
+.skin .sk-item { pointer-events: auto; }
+
+/* Imported Delta skins: the art covers the whole screen and places the game itself */
+.skin.delta { top: 0; bottom: 0; left: 0; right: 0; padding: 0; background: none; opacity: 1; }
+.skin.delta.translucent { opacity: var(--skin-alpha); }
+.sk-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.skin.delta .sk-item { background: none; box-shadow: none; border-radius: 14px; transform: none; filter: none; }
+.skin.delta .sk-stick::before { display: none; }
+.skin.delta .sk-item.on { background: rgba(255, 255, 255, .16); }
+.sk-thumb { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 #play.noskin #screenArea { top: var(--sat); bottom: var(--sab); height: auto; }
 
 /* Hide EmulatorJS's own touch gamepad; N6PhO draws its own */
@@ -142,7 +162,10 @@ body.land .skin .sk-item { pointer-events: auto; }
 /* ---------- Skin items ---------- */
 .sk-item { position: absolute; touch-action: none; }
 .sk-item * { pointer-events: none; }
-.sk-item::after { content: ''; position: absolute; inset: -14px; } /* starts touches just outside the art */
+.sk-item::after { /* starts touches just outside the art */
+  content: ''; position: absolute;
+  top: calc(-1 * var(--ht, 14px)); bottom: calc(-1 * var(--hb, 14px)); left: calc(-1 * var(--hl, 14px)); right: calc(-1 * var(--hr, 14px));
+}
 
 .sk-button {
   display: grid; place-items: center;
@@ -166,7 +189,8 @@ body.land .skin .sk-item { pointer-events: auto; }
   clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
 }
 .sk-knob {
-  position: absolute; inset: 0; margin: auto; width: 46%; height: 46%; border-radius: 50%;
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 46%; height: 46%; border-radius: 50%;
   background: radial-gradient(circle at 40% 35%, #c7cad0, #8b8f96 70%);
   box-shadow: 0 .1em .2em rgba(0, 0, 0, .5);
 }
@@ -211,7 +235,7 @@ body.land .sk-menu { background: rgba(255, 255, 255, .22); color: var(--ink); }
 
 /* ---------- Overlays ---------- */
 .badge {
-  position: absolute; z-index: 3;
+  position: absolute; z-index: 4;
   top: calc(var(--sat) + .5rem); left: calc(var(--sal) + .5rem);
   display: flex; gap: .45rem; align-items: center;
   padding: .3rem .7rem; border-radius: 999px;
@@ -222,7 +246,7 @@ body.land .sk-menu { background: rgba(255, 255, 255, .22); color: var(--ink); }
 body.land .badge { left: 50%; transform: translateX(-50%); top: calc(var(--sat) + 15%); }
 .dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--c); }
 .fab {
-  position: absolute; z-index: 3;
+  position: absolute; z-index: 4;
   top: calc(var(--sat) + .5rem); right: calc(var(--sar) + .5rem);
   width: 42px; height: 42px; border-radius: 50%; border: 0;
   display: grid; place-items: center;
@@ -250,7 +274,10 @@ body.land .sheet-card {
 }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
 .sheet-head strong { display: block; font-size: 2rem; font-weight: 900; font-stretch: 125%; letter-spacing: .12em; line-height: 1; }
-.sheet .sound { margin-top: .75rem; }
+.sheet .sound { margin-top: .25rem; }
+.sheet .note { margin: .6rem 0 0; }
+.sheet select { margin-top: .4rem; }
+#screenNote { margin-top: .5rem; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .55rem 0; font-weight: 600; }
 .toggle input { width: 1.4rem; height: 1.4rem; accent-color: var(--p2); }
 .slider { margin-top: .5rem; }

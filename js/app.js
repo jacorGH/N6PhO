@@ -87,6 +87,13 @@ const App = (() => {
   function setAspect(ar) { if (ar && isFinite(ar) && Math.abs(ar - aspect) > 0.001) { aspect = ar; layout(); } }
   function onLayout(fn) { layoutHooks.push(fn); }
 
+  // An imported Delta skin can place the game screen anywhere; null = default layout.
+  function setScreenRect(r) {
+    const el = $('#screenArea');
+    if (!r) { ['left', 'top', 'width', 'height', 'right', 'bottom'].forEach((k) => { el.style[k] = ''; }); return; }
+    Object.assign(el.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, right: 'auto', bottom: 'auto' });
+  }
+
   function layout() {
     const play = $('#play');
     if (play.hidden) return;
@@ -189,5 +196,5 @@ const App = (() => {
   window.addEventListener('DOMContentLoaded', init);
 
   return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake,
-    layout, setAspect, onLayout, enterPlay, openMenu, closeMenu };
+    layout, setAspect, onLayout, setScreenRect, enterPlay, openMenu, closeMenu };
 })();

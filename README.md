@@ -9,6 +9,17 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
 - **Guests send only controller input** back; the host feeds it into ports 2–4.
 - **Spectators** watch without a port. The host can move people between watching and playing.
 
+## Private screens (no screen watching)
+Split-screen games put every player's view on one picture. With **Private screens** on, the host
+cuts the picture up *before sending it*, so each player only ever receives their own view.
+The host's own screen shows only port 1's view too. Spectators always get the whole game.
+
+- Host menu → Screens → pick the game's layout: top / bottom, left / right, or quarters.
+  The choice is remembered per game.
+- Turn it on when the match starts and off for menus (menus use the whole screen).
+- Players whose port isn't part of the split (e.g. port 3 in a 2-player match) see the whole game.
+- Top / bottom halves are wide strips; landscape gives them much more room.
+
 ## Touch controller
 - **Portrait:** game on top, full controller deck below. On tall phones the controls lift
   toward your thumbs.
@@ -28,11 +39,21 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
 - **Guests:** split-screen view crop, sound on, leave room.
 - **Everyone:** touch controls on/off, vibration on/off, landscape button opacity.
 
-## Skins are data
+## Delta skins
+Menu → Controls → **Import Delta skin** and pick an N64 `.deltaskin` file. N6PhO reads its layout,
+art (PDF or PNG), thumbstick and touch areas, and places the game screen where the skin says.
+Skins are stored on the device and can be switched or deleted from the same menu.
+Supported Delta inputs: A, B, Z, L, R, Start, D-pad, C buttons, analog stick, menu, quick save/load.
+
+## Built-in skin is data
 `js/skin-n64.js` defines every button's position and size for portrait and landscape.
 Units: portrait 1u = 1% of screen width, landscape 1u = 1% of screen height. Each item has an
 `anchor` (`tl`, `tc`, `tr`, `bl`, `bc`, `br`) and x/y measured from that corner.
 Add a new skin by copying the file, changing the name, and setting `skin` in `js/config.js`.
+
+## Icon
+`icons/` holds the home-screen icon (180 px for iPhone, 192/512 px for Android) and favicon.
+`manifest.json` makes it installable with **Add to Home Screen**.
 
 ## Setup
 1. Push this folder to a GitHub repo and turn on GitHub Pages (Settings → Pages → main / root).

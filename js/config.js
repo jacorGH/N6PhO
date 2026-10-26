@@ -17,6 +17,7 @@ window.N6 = {
   // Stream. The host uploads one stream PER guest: total upload = videoBitrate x guests.
   streamFps: 60,
   videoBitrate: 2000000,
+  maxStreamWidth: 960, // each guest's picture is scaled down to at most this width before sending
 
   // Keeps WebGL frames readable so the canvas can be captured (Safari needs this).
   preserveDrawingBuffer: true,

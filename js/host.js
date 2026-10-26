@@ -1,22 +1,38 @@
-// Host: runs EmulatorJS, streams video + audio to every guest, applies all players' inputs.
+// Host: runs EmulatorJS, sends each guest their own picture (full game, or only their part of the
+// split screen when private screens are on), and applies every player's input.
 const Host = (() => {
   const C = window.N6;
   const { $, esc } = App;
-  let peer = null, code = '', hostName = 'Host', stream = null, started = false, pingTimer = 0, romFile = null;
+  let peer = null, code = '', hostName = 'Host', started = false, pingTimer = 0, romFile = null, gameName = '';
+  let audioTrack = null, drawRaf = 0, hostCtx = null;
+  let priv = false, split = 'quad';
   const clients = new Map();               // peerId -> client
   const ports = [null, null, null, null];  // index 0 is always the host
-  const local = { slot: 0, last: new Map() }; // the host's own touch controls -> port 1
+  const local = { slot: 0, last: new Map() };
+  const views = new Map();                 // region key -> { canvas, ctx, track, rect }
+
+  const SPLITS = {
+    tb: [[0, 0, 1, 0.5], [0, 0.5, 1, 0.5]],
+    lr: [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]],
+    quad: [[0, 0, 0.5, 0.5], [0.5, 0, 0.5, 0.5], [0, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]]
+  };
 
   function open(file, name) {
     romFile = file;
     hostName = name;
+    gameName = file.name.replace(/\.[^.]+$/, '');
     code = App.makeCode();
     peer = new Peer(C.peerPrefix + code, App.peerOptions());
 
     peer.on('open', () => {
       App.enterPlay('host', { onLeave: close });
+      $('#play').classList.add('prestart');
       $('#sheetCode').textContent = code;
-      Skin.mount($('#skin'), { onState: (s) => applyInput(local, s), onMenu: App.openMenu, gamepad: false });
+      Skin.mount($('#skin'), {
+        onState: (s) => applyInput(local, s), onMenu: App.openMenu, gamepad: false,
+        onAction: (a) => (a === 'quicksave' ? gameCall('quickSave', 'Saved.') : gameCall('quickLoad', 'Loaded.'))
+      });
+      wireScreens();
       render();
       badge();
       loadEmulator(romFile);
@@ -49,13 +65,136 @@ const Host = (() => {
     try { peer.destroy(); } catch (e) {}
   }
 
+  // ---------- Private screens ----------
+  function wireScreens() {
+    const privEl = $('#optPrivate'), splitEl = $('#splitSel');
+    split = App.prefs.get('split:' + gameName) || 'quad';
+    splitEl.value = split;
+    privEl.checked = false;
+    privEl.onchange = () => {
+      priv = privEl.checked;
+      updateViews();
+      App.toast(priv ? 'Private screens on. Everyone sees only their own view.' : 'Private screens off. Everyone sees the whole game.');
+      broadcast();
+    };
+    splitEl.onchange = () => {
+      split = splitEl.value;
+      App.prefs.set('split:' + gameName, split);
+      updateViews();
+      broadcast();
+    };
+    App.onLayout(sizeHostView);
+  }
+
+  function keyFor(slot) {
+    if (!priv || slot == null) return 'full';
+    return SPLITS[split][slot] ? `${split}:${slot}` : 'full';
+  }
+  function rectOf(key) {
+    if (key === 'full') return [0, 0, 1, 1];
+    const [sp, i] = key.split(':');
+    return SPLITS[sp][+i];
+  }
+
+  function getView(key) {
+    let v = views.get(key);
+    if (!v) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640; canvas.height = 480;
+      let shelf = document.getElementById('viewShelf');
+      if (!shelf) {
+        // Some browsers only stream canvases that are in the page, so keep them in an invisible shelf.
+        shelf = document.createElement('div');
+        shelf.id = 'viewShelf';
+        shelf.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
+        document.body.appendChild(shelf);
+      }
+      shelf.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+      const track = canvas.captureStream(C.streamFps).getVideoTracks()[0];
+      if (track && 'contentHint' in track) track.contentHint = 'motion';
+      v = { canvas, ctx, track, rect: rectOf(key) };
+      views.set(key, v);
+    }
+    return v;
+  }
+
+  function updateViews() {
+    for (const c of clients.values()) {
+      const k = keyFor(c.slot);
+      if (k !== c.viewKey) { c.viewKey = k; if (started) swapTrack(c, getView(k).track); }
+    }
+    for (const [k, v] of views) {
+      if (![...clients.values()].some((c) => c.viewKey === k)) { v.track.stop(); v.canvas.remove(); views.delete(k); }
+    }
+    const [, , w, h] = rectOf(keyFor(0));
+    App.setAspect((w * 4) / (h * 3));
+  }
+
+  function swapTrack(c, track) {
+    const pc = c.call && c.call.peerConnection;
+    const s = pc && pc.getSenders().find((x) => x.track && x.track.kind === 'video');
+    if (s) s.replaceTrack(track).catch(() => callClient(c));
+    else callClient(c);
+  }
+
+  // The game is 4:3; find it inside the emulator canvas in case it's letterboxed.
+  function contentRect(src) {
+    const sw = src.width, sh = src.height;
+    let gw = sw, gh = sw * 0.75;
+    if (gh > sh) { gh = sh; gw = sh * 4 / 3; }
+    return [(sw - gw) / 2, (sh - gh) / 2, gw, gh];
+  }
+
+  function drawView(v, src, cr) {
+    const [x, y, w, h] = v.rect;
+    const sx = cr[0] + x * cr[2], sy = cr[1] + y * cr[3], sw = w * cr[2], sh = h * cr[3];
+    let ow = Math.round(sw), oh = Math.round(sh);
+    if (ow > C.maxStreamWidth) { oh = Math.round((oh * C.maxStreamWidth) / ow); ow = C.maxStreamWidth; }
+    ow -= ow % 2; oh -= oh % 2;
+    if (ow < 2 || oh < 2) return;
+    if (v.canvas.width !== ow || v.canvas.height !== oh) { v.canvas.width = ow; v.canvas.height = oh; }
+    v.ctx.drawImage(src, sx, sy, sw, sh, 0, 0, ow, oh);
+  }
+
+  function sizeHostView() {
+    const hv = $('#hostView');
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const w = Math.round(hv.clientWidth * dpr), h = Math.round(hv.clientHeight * dpr);
+    if (w && h && (hv.width !== w || hv.height !== h)) { hv.width = w; hv.height = h; }
+  }
+
+  function drawHost(src, cr) {
+    const hv = $('#hostView');
+    if (hv.hidden) return;
+    if (!hostCtx) hostCtx = hv.getContext('2d');
+    const [x, y, w, h] = rectOf(keyFor(0));
+    const sx = cr[0] + x * cr[2], sy = cr[1] + y * cr[3], sw = w * cr[2], sh = h * cr[3];
+    const W = hv.width, H = hv.height, ar = sw / sh;
+    let dw = W, dh = W / ar;
+    if (dh > H) { dh = H; dw = H * ar; }
+    hostCtx.fillStyle = '#000';
+    hostCtx.fillRect(0, 0, W, H);
+    hostCtx.drawImage(src, sx, sy, sw, sh, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+
+  function frame() {
+    const src = emuCanvas();
+    if (src && src.width && src.height) {
+      const cr = contentRect(src);
+      for (const v of views.values()) drawView(v, src, cr);
+      drawHost(src, cr);
+    }
+    drawRaf = requestAnimationFrame(frame);
+  }
+
   // ---------- Emulator ----------
   function loadEmulator(file) {
     window.EJS_player = '#game';
     window.EJS_core = 'n64';
     window.EJS_pathtodata = C.ejsData;
     window.EJS_gameUrl = URL.createObjectURL(file);
-    window.EJS_gameName = file.name.replace(/\.[^.]+$/, '');
+    window.EJS_gameName = gameName;
     window.EJS_color = '#d8352b';
     window.EJS_onGameStart = onGameStart;
     const s = document.createElement('script');
@@ -71,31 +210,28 @@ const Host = (() => {
     if (!started || !g || typeof g[fn] !== 'function') { App.toast('Start the game first.'); return; }
     try { g[fn](1); App.toast(done); App.closeMenu(); } catch (e) { App.toast('That didn’t work in this build.'); }
   }
-
   function emuCanvas() {
     return (window.EJS_emulator && window.EJS_emulator.canvas) || document.querySelector('#game canvas');
   }
 
   function onGameStart() {
     started = true;
-    const canvas = emuCanvas();
-    if (!canvas || !canvas.captureStream) {
-      App.toast('This browser cannot stream the game. Try hosting from the other phone.');
-      return;
-    }
-    stream = canvas.captureStream(C.streamFps);
-    const v = stream.getVideoTracks()[0];
-    if (v && 'contentHint' in v) v.contentHint = 'motion';
+    $('#play').classList.remove('prestart');
+    $('#hostView').hidden = false;
+    App.layout();
+    if (!drawRaf) drawRaf = requestAnimationFrame(frame);
+    updateViews();
     attachAudio(0);
     for (const c of clients.values()) callClient(c);
     broadcast();
   }
 
+  // Audio starts a moment after the game; once it exists, re-call guests so they get sound.
   function attachAudio(tries) {
     const a = App.audioTrack();
     if (a) {
-      if (!stream.getAudioTracks().length) {
-        stream.addTrack(a);
+      if (!audioTrack) {
+        audioTrack = a;
         if (tries > 0) for (const c of clients.values()) callClient(c);
       }
       return;
@@ -104,9 +240,12 @@ const Host = (() => {
   }
 
   function callClient(c) {
-    if (!stream) return;
+    if (!started) return;
     try { if (c.call) c.call.close(); } catch (e) {}
-    const call = peer.call(c.id, stream);
+    c.viewKey = keyFor(c.slot);
+    const tracks = [getView(c.viewKey).track];
+    if (audioTrack) tracks.push(audioTrack);
+    const call = peer.call(c.id, new MediaStream(tracks));
     c.call = call;
     if (call) setTimeout(() => tuneBitrate(call), 1500);
   }
@@ -127,7 +266,7 @@ const Host = (() => {
   // ---------- Guests ----------
   function onJoin(conn) {
     const meta = conn.metadata || {};
-    const c = { id: conn.peer, conn, name: String(meta.name || 'Guest').slice(0, 16), slot: null, rtt: null, call: null, last: new Map() };
+    const c = { id: conn.peer, conn, name: String(meta.name || 'Guest').slice(0, 16), slot: null, rtt: null, call: null, viewKey: null, last: new Map() };
     clients.set(c.id, c);
     if (meta.role === 'player') {
       const s = freeSlot();
@@ -137,7 +276,7 @@ const Host = (() => {
     conn.on('data', (d) => onData(c, d));
     conn.on('close', () => drop(c));
     conn.on('error', () => drop(c));
-    if (started) callClient(c);
+    callClient(c);
     App.toast(`${c.name} joined${c.slot != null ? ` on port ${c.slot + 1}` : ' to watch'}.`);
     broadcast();
   }
@@ -173,14 +312,15 @@ const Host = (() => {
   }
 
   function freeSlot() { for (let i = 1; i < 4; i++) if (!ports[i]) return i; return -1; }
-  function seat(c, s) { release(c); if (c.slot != null) ports[c.slot] = null; ports[s] = c; c.slot = s; }
-  function unseat(c) { release(c); if (c.slot != null) ports[c.slot] = null; c.slot = null; }
+  function seat(c, s) { release(c); if (c.slot != null) ports[c.slot] = null; ports[s] = c; c.slot = s; updateViews(); }
+  function unseat(c) { release(c); if (c.slot != null) ports[c.slot] = null; c.slot = null; updateViews(); }
 
   function drop(c) {
     if (!clients.has(c.id)) return;
     unseat(c);
     try { if (c.call) c.call.close(); } catch (e) {}
     clients.delete(c.id);
+    updateViews();
     App.toast(`${c.name} left.`);
     broadcast();
   }
@@ -189,13 +329,12 @@ const Host = (() => {
 
   function rosterFor(c) {
     return {
-      t: 'roster',
-      code,
+      t: 'roster', code,
       ports: ports.map((p, i) => (i === 0 ? hostName : p ? p.name : null)),
       you: c.slot,
       watching: [...clients.values()].filter((x) => x.slot == null).length,
-      rtt: c.rtt,
-      started
+      rtt: c.rtt, started,
+      priv, privateView: keyFor(c.slot) !== 'full'
     };
   }
 
@@ -215,7 +354,7 @@ const Host = (() => {
   function badge() {
     const players = 1 + ports.filter((p, i) => i > 0 && p).length;
     const watching = [...clients.values()].filter((c) => c.slot == null).length;
-    $('#badge').innerHTML = `<span class="dot p1"></span><span>Room ${esc(code)}</span><span class="dim">${players}P${watching ? ` +${watching} watching` : ''}</span>`;
+    $('#badge').innerHTML = `<span class="dot p1"></span><span>Room ${esc(code)}</span><span class="dim">${players}P${watching ? ` +${watching} watching` : ''}${priv ? ', private' : ''}</span>`;
   }
 
   function render() {
