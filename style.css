@@ -347,3 +347,27 @@ body.land .sheet-card {
 .spec-list li.empty { display: block; background: none; padding: 0; }
 
 @media (prefers-reduced-motion: reduce) { .sk-button, .sk-cpad i { transition: none; } .spinner { animation-duration: 3s; } }
+
+/* ---------- Direct invites and relay ---------- */
+.code-box {
+  width: 100%; font: 600 .8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink);
+  background: var(--well); border: 2px solid transparent; border-radius: 10px; padding: .6rem .7rem;
+  resize: vertical; word-break: break-all; margin: .3rem 0 .5rem;
+}
+.code-box:focus { border-color: var(--p3); outline: none; }
+.panel.direct { border: 2px solid var(--p2); }
+.paste-invite { width: 100%; margin-top: .6rem; }
+.relay-panel summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+.relay-panel summary::-webkit-details-marker { display: none; }
+.relay-panel > summary::after { content: '▾'; color: var(--ink-dim); font-size: 1.2rem; transition: transform .15s; }
+.relay-panel[open] > summary::after { transform: rotate(180deg); }
+.relay-panel > summary h2 { margin: 0; }
+.relay-panel > summary + p { margin-top: .75rem; }
+.relay-panel #relaySave { width: 100%; }
+.guide { margin-top: 1rem; background: var(--well); border-radius: 12px; padding: .7rem .9rem; }
+.guide summary { font-weight: 700; cursor: pointer; }
+.guide ol { padding-left: 1.2rem; margin: .6rem 0; }
+.guide li { margin-bottom: .5rem; }
+.guide .btn { margin: .4rem 0; }
+.guide code { font: .8rem ui-monospace, Menlo, monospace; background: rgba(0,0,0,.25); border-radius: 4px; padding: .05rem .3rem; }
+.guide code.cmd { display: block; padding: .5rem; margin-top: .35rem; word-break: break-all; }

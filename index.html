@@ -51,6 +51,24 @@
     <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player">
   </label>
 
+  <section id="directPanel" class="panel direct" hidden>
+    <h2>Invite from <span id="dFrom">a friend</span></h2>
+    <p class="dim">A direct connection: no lobby server needed.</p>
+    <div id="dChoose" class="row">
+      <button id="dJoinBtn" class="btn primary">Join as player</button>
+      <button id="dWatchBtn" class="btn ghost">Watch</button>
+    </div>
+    <div id="dReplyBox" hidden>
+      <p><strong>Send this reply back to the host</strong>, then wait here.</p>
+      <textarea id="dReplyCode" class="code-box" readonly rows="3"></textarea>
+      <div class="row">
+        <button id="dShareReply" class="btn primary">Share reply</button>
+        <button id="dCopyReply" class="btn ghost">Copy</button>
+      </div>
+    </div>
+    <p id="dGuestStatus" class="msg" role="status"></p>
+  </section>
+
   <section class="panel">
     <h2>Host a room</h2>
     <p class="dim">Your phone runs the game and streams it to everyone else. Only you need the ROM.</p>
@@ -80,7 +98,57 @@
       <button id="joinBtn" class="btn primary">Join as player</button>
       <button id="watchBtn" class="btn ghost">Watch</button>
     </div>
+    <button id="pasteInviteBtn" class="btn small ghost paste-invite">Got an invite code instead? Paste it</button>
   </section>
+
+  <details class="panel relay-panel">
+    <summary><span><h2>Your relay</h2><span id="relayState" class="dim small">Free shared relay</span></span></summary>
+    <p class="dim small">A relay carries the game when two networks can’t connect directly (strict home routers, mobile data). Your own relay is more reliable than the free shared one.</p>
+    <label class="field">
+      <span>Relay</span>
+      <select id="relayMode">
+        <option value="default">Free shared relay</option>
+        <option value="cloudflare">Cloudflare (recommended)</option>
+        <option value="coturn">Your own server</option>
+      </select>
+    </label>
+    <div data-relay="cloudflare" hidden>
+      <label class="field"><span>Worker address</span><input id="relayUrl" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://n6pho-relay.you.workers.dev"></label>
+      <label class="field"><span>Access code</span><input id="relayCode" autocomplete="off" spellcheck="false" placeholder="The ACCESS_CODE you set"></label>
+    </div>
+    <div data-relay="coturn" hidden>
+      <label class="field"><span>Relay address</span><input id="relayTurn" autocomplete="off" spellcheck="false" placeholder="turn:203.0.113.5:3478"></label>
+      <label class="field"><span>Secret</span><input id="relaySecret" autocomplete="off" spellcheck="false" placeholder="From the setup script"></label>
+    </div>
+    <div id="relayShareRow" hidden>
+      <label class="toggle"><span>Share my relay with friends I invite</span><input type="checkbox" id="relayShare"></label>
+      <p class="dim small">Direct invites then carry logins that expire within a day, so a friend on a strict network can still connect. Anyone holding that invite link could use your relay until then.</p>
+    </div>
+    <button id="relaySave" class="btn primary">Save and test</button>
+    <p id="relayMsg" class="msg" role="status"></p>
+
+    <details class="guide">
+      <summary>Setup guide: Cloudflare</summary>
+      <ol>
+        <li>Sign up for a free account at dash.cloudflare.com (works from your phone).</li>
+        <li>Open <b>Realtime</b> → <b>TURN Server</b> and create a TURN key. Keep its <b>Key ID</b> and <b>API token</b>.</li>
+        <li>Open <b>Workers &amp; Pages</b> → <b>Create</b> → start from the Hello World Worker, then <b>Edit code</b>.
+          <button id="workerCopy" class="btn small">Copy the Worker code</button> and paste it over everything, then <b>Deploy</b>.</li>
+        <li>In the Worker’s <b>Settings</b> → <b>Variables and Secrets</b>, add three: <code>TURN_KEY_ID</code>, <code>TURN_KEY_API_TOKEN</code> and <code>ACCESS_CODE</code> (a passphrase you make up). Add the last two as secrets.</li>
+        <li>Back here, choose Cloudflare, enter the Worker’s address and your access code, and tap <b>Save and test</b>.</li>
+      </ol>
+      <p class="dim small">The Worker only hands out logins that expire within a day, and only to someone with your access code. Check Cloudflare’s dashboard for its current free allowance.</p>
+    </details>
+    <details class="guide">
+      <summary>Setup guide: your own server</summary>
+      <ol>
+        <li>Create a free Ubuntu server, for example on Oracle Cloud’s Always Free tier.</li>
+        <li>In the cloud firewall (on Oracle: the subnet’s Security List) allow <b>UDP 3478</b>, <b>TCP 3478</b> and <b>UDP 49160–49999</b>.</li>
+        <li>On the server run:<br><code class="cmd">curl -fsSLO <span class="app-url"></span>relay/setup-coturn.sh &amp;&amp; sudo bash setup-coturn.sh <span class="app-url"></span></code></li>
+        <li>Open the link it prints on your phone. N6PhO saves the relay; tap <b>Save and test</b>.</li>
+      </ol>
+    </details>
+  </details>
 
   <p id="lobbyMsg" class="msg" role="status"></p>
 </main>
@@ -105,7 +173,7 @@
   <button id="ejsDone" class="btn primary ejs-done" hidden>Back to N6PhO</button>
   <div id="reconnecting" class="reconnecting" hidden>
     <div class="spinner" aria-hidden="true"></div>
-    <p><strong>Reconnecting…</strong><br><span class="dim">Your port is being held for you.</span></p>
+    <p><strong>Reconnecting…</strong><br><span id="reconnectHint" class="dim">Your port is being held for you.</span></p>
     <button id="giveUpBtn" class="btn small ghost">Leave room</button>
   </div>
   <p id="toast" class="toast" role="status" hidden></p>
@@ -121,7 +189,17 @@
       </div>
 
       <section data-for="host">
-        <button id="inviteBtn" class="btn small">Share invite</button>
+        <button id="inviteBtn" class="btn small">Share room code</button>
+        <h3>Invite directly</h3>
+        <p class="dim small note">Works without the lobby server. Send the invite, then paste the reply your friend sends back. One invite per friend.</p>
+        <button id="dInviteBtn" class="btn small">Create invite</button>
+        <div id="dInviteBox" hidden>
+          <textarea id="dInviteCode" class="code-box" readonly rows="3"></textarea>
+          <div class="row"><button id="dShareInvite" class="btn small primary">Share invite</button><button id="dCopyInvite" class="btn small ghost">Copy</button></div>
+          <label class="field"><span>Friend’s reply</span><textarea id="dReply" class="code-box" rows="3" placeholder="Paste the reply code here"></textarea></label>
+          <div class="row"><button id="dPaste" class="btn small ghost">Paste</button><button id="dConnect" class="btn small primary">Connect</button></div>
+        </div>
+        <p id="dStatus" class="dim small"></p>
         <h3>Players</h3>
         <ol id="portList" class="port-list"></ol>
         <h3>Watching</h3>
@@ -212,6 +290,8 @@
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="js/skin-n64.js"></script>
 <script src="js/app.js"></script>
+<script src="js/link.js"></script>
+<script src="js/relay.js"></script>
 <script src="js/skin.js"></script>
 <script src="js/deltaskin.js"></script>
 <script src="js/voice.js"></script>

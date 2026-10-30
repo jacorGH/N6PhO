@@ -58,9 +58,10 @@ const App = (() => {
     for (const n of crypto.getRandomValues(new Uint32Array(4))) s += CODE_CHARS[n % CODE_CHARS.length];
     return s;
   }
-  function peerOptions() {
+  function peerOptions(iceServers) {
     const o = { debug: 1 };
-    if (C.iceServers) o.config = { iceServers: C.iceServers };
+    const ice = iceServers || C.iceServers;
+    if (ice) o.config = { iceServers: ice };
     return o;
   }
   // The emulator times itself off its audio. If iOS suspends that audio (a call, Siri, the mic
@@ -206,6 +207,32 @@ const App = (() => {
       keepAwake();
       Guest.join(code, playerName(), role);
     };
+    // Direct invites: opened as a link (#invite=…) or pasted.
+    const showInvite = (text) => {
+      let inv;
+      try {
+        inv = Codes.unpack(text);
+        if (inv.kind !== 'invite') throw new Error('That’s a reply code. It goes into the host’s phone, under Invite directly.');
+      } catch (e) { msg('lobbyMsg', e.message); return; }
+      $('#dFrom').textContent = inv.name || 'a friend';
+      $('#directPanel').hidden = false;
+      $('#dChoose').hidden = false;
+      $('#dReplyBox').hidden = true;
+      msg('dGuestStatus', '');
+      const go = (role) => { keepAwake(); $('#dChoose').hidden = true; Guest.joinDirect(inv, playerName(), role); };
+      $('#dJoinBtn').onclick = () => go('player');
+      $('#dWatchBtn').onclick = () => go('spectator');
+      $('#directPanel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    const hm = location.hash.match(/invite=(N6I\.[A-Za-z0-9_-]+)/);
+    if (hm) { showInvite(hm[1]); history.replaceState(null, '', location.pathname + location.search); }
+    $('#pasteInviteBtn').addEventListener('click', async () => {
+      let t = '';
+      try { t = await navigator.clipboard.readText(); } catch (e) { t = window.prompt('Paste the invite code') || ''; }
+      if (t) showInvite(t);
+    });
+    document.querySelectorAll('.app-url').forEach((el) => { el.textContent = location.origin + location.pathname; });
+
     $('#joinBtn').addEventListener('click', () => join('player'));
     $('#watchBtn').addEventListener('click', () => join('spectator'));
 

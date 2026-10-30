@@ -1,6 +1,8 @@
-// Voice chat. The host is the hub: it hears every guest, and builds one audio mix per guest
-// (game sound + host mic + every OTHER guest's voice) that rides along with that guest's video.
-// Guests send their mic to the host on a separate one-way call.
+// Voice chat, full mesh: everyone hears everyone.
+// - Host ↔ guest: the host's mic is mixed into the game sound it sends each guest; each guest
+//   sends its mic to the host on a one-way call.
+// - Guest ↔ guest: guests call each other directly, with the host passing the connection
+//   messages between them (the broker). No lobby server involved.
 const Voice = (() => {
   let ctx = null, gameSrc = null;
   let mic = null, micSrc = null, muted = false;
@@ -46,7 +48,6 @@ const Voice = (() => {
       outs.set(id, d);
       if (gameSrc) gameSrc.connect(d);
       if (micSrc) micSrc.connect(d);
-      for (const [vid, v] of voices) if (vid !== id) v.src.connect(d);
     }
     return d.stream.getAudioTracks()[0];
   }
@@ -54,7 +55,7 @@ const Voice = (() => {
   function dropOut(id) {
     const d = outs.get(id);
     if (!d) return;
-    const nodes = [gameSrc, micSrc, ...[...voices.values()].map((v) => v.src)];
+    const nodes = [gameSrc, micSrc];
     nodes.forEach((n) => { if (n) try { n.disconnect(d); } catch (e) {} });
     outs.delete(id);
   }
@@ -67,15 +68,12 @@ const Voice = (() => {
     el.srcObject = stream;
     el.volume = App.prefs.get('voiceVol') ?? 1;
     play(el);
-    const src = ctx.createMediaStreamSource(stream);
-    for (const [oid, d] of outs) if (oid !== id) src.connect(d);
-    voices.set(id, { src, el });
+    voices.set(id, { el });
   }
 
   function removeVoice(id) {
     const v = voices.get(id);
     if (!v) return;
-    try { v.src.disconnect(); } catch (e) {}
     v.el.pause(); v.el.srcObject = null;
     pendingPlays.delete(v.el);
     voices.delete(id);

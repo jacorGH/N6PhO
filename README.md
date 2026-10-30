@@ -42,11 +42,48 @@ Menu → Stick and buttons (saved per phone):
 - **Button size:** 80% to 130% (built-in skin).
 Sensitivity, dead zone, response and invert also apply to a Bluetooth controller's stick.
 
+## Two ways to join
+- **Room code** (uses the free PeerJS lobby server to find each other).
+- **Direct invite** (no lobby server at all). Host menu → *Invite directly* → **Create invite** →
+  share it. Your friend opens the link, taps Join, and shares back a short **reply**. Paste it into
+  *Friend’s reply* → **Connect**. One invite per friend. Invites are about 120 characters and replies
+  about 110 (more if the invite carries your relay logins).
+- Only the first connection differs. Video, game sound, voice and stats are all set up *inside*
+  that connection afterwards, so once you're connected nothing needs the lobby server.
+- If the lobby server is down, the room still opens: the room code shows "—" and direct invites work.
+- Video uses **H.264 first** (iPhones encode it in hardware, easier on the battery), then VP8.
+- Direct invites include the room code when there is one, so a direct friend whose connection drops
+  can come back through the lobby automatically. With no room code, they need a fresh invite
+  (their port is still held for a minute).
+
+## Host as broker
+Once friends are connected, the host passes connection messages between them. That's how
+guests open voice connections to each other, whether they joined by room code or direct invite,
+with no lobby server involved. Only connection messages are passed along; the host doesn't see the audio.
+
+## Your relay (TURN)
+Lobby → **Your relay**. A relay carries the game when two networks can't connect directly.
+- **Free shared relay** (default): Google STUN + PeerJS's public relay.
+- **Cloudflare** (recommended): paste `relay/cloudflare-worker.js` into a free Cloudflare Worker
+  (the app has a *Copy the Worker code* button), set three settings (`TURN_KEY_ID`,
+  `TURN_KEY_API_TOKEN`, `ACCESS_CODE`), then enter the Worker address and access code. The Worker
+  only hands out logins that expire within a day, and only to someone with your access code.
+- **Your own server**: run `relay/setup-coturn.sh` on a free Ubuntu server (e.g. Oracle Always Free):
+  `curl -fsSLO https://YOU.github.io/n6pho/relay/setup-coturn.sh && sudo bash setup-coturn.sh https://YOU.github.io/n6pho/`
+  It prints a link; open it on your phone and N6PhO saves the relay. Logins are made on your
+  phone from the server's secret and expire within a day. Open UDP/TCP 3478 and UDP 49160–49999
+  in the cloud firewall.
+- **Save and test** checks that the relay really hands out a relayed address.
+- **Share my relay with friends I invite**: direct invites carry those short-lived logins, so a
+  friend on a strict network can still connect. Anyone holding that invite link could use your
+  relay until the logins expire.
+
 ## Voice chat
 Menu → Voice chat → **Microphone**. Everyone in the room hears you, spectators included.
 A mic button appears next to the status badge; tap it to mute and unmute.
-- The host's phone is the hub: it mixes the game sound with everyone's voices and sends each
-  person a mix without their own voice in it, so nobody hears themselves.
+- Full mesh, so everyone hears everyone: the host's voice rides along with the game sound it
+  sends, guests send their mic to the host, and guests call each other directly through the host
+  as broker.
 - Use headphones if you can. Phone speakers plus a mic can echo, and iPhones lower game volume
   while the mic is on.
 - If voices are silent, tap the screen once (browsers hold back sound until you tap).

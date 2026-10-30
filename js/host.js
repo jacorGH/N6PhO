@@ -4,6 +4,7 @@ const Host = (() => {
   const C = window.N6;
   const { $, esc } = App;
   let peer = null, code = '', hostName = 'Host', started = false, pingTimer = 0, romFile = null, gameName = '';
+  let ice = null, pending = null; // ice = ICE servers in use; pending = direct invite waiting for a reply
   let audioTrack = null, drawRaf = 0, lastDraw = 0;
   let priv = false, split = 'quad', quality = 'auto', mid = 0.06;
   let preset = null, gw = 0; // gw = CSS width of the emulator box (sets its render resolution)
@@ -28,52 +29,27 @@ const Host = (() => {
     romFile = file;
     hostName = name;
     gameName = file.name.replace(/\.[^.]+$/, '');
-    code = App.makeCode();
     preset = C.perfPresets[App.prefs.get('perf')] || C.perfPresets.balanced;
     C.streamFps = preset.fps;
     Voice.init(); // must happen inside the tap that opened the room
-    peer = new Peer(C.peerPrefix + code, App.peerOptions());
 
-    peer.on('open', () => {
-      App.enterPlay('host', { onLeave: close });
-      $('#play').classList.add('prestart');
-      $('#sheetCode').textContent = code;
-      Skin.mount($('#skin'), {
-        onState: (s) => applyInput(local, s), onMenu: App.openMenu, gamepad: false,
-        onAction: (a) => (a === 'quicksave' ? gameCall('quickSave', 'Saved.') : gameCall('quickLoad', 'Loaded.'))
-      });
-      wireScreens();
-      render();
-      badge();
-      loadEmulator(romFile);
-      if (!pingTimer) pingTimer = setInterval(pingAll, 2000);
-      App.toast(`Room ${code} is open. Tap play on the game to start.`);
+    // The room opens right away; the lobby server is only needed for room codes.
+    App.enterPlay('host', { onLeave: close });
+    $('#play').classList.add('prestart');
+    $('#sheetCode').textContent = '…';
+    Skin.mount($('#skin'), {
+      onState: (s) => applyInput(local, s), onMenu: App.openMenu, gamepad: false,
+      onAction: (a) => (a === 'quicksave' ? gameCall('quickSave', 'Saved.') : gameCall('quickLoad', 'Loaded.'))
     });
-    peer.on('connection', (conn) => conn.on('open', () => onJoin(conn)));
-    peer.on('call', (call) => {
-      // Guests send their microphone on a separate one-way call.
-      const c = clients.get(call.peer);
-      if (!c || !call.metadata || call.metadata.kind !== 'voice') { try { call.close(); } catch (e) {} return; }
-      try { if (c.voiceCall) c.voiceCall.close(); } catch (e) {}
-      c.voiceCall = call;
-      call.answer();
-      call.on('stream', (st) => { Voice.addVoice(c.id, st); render(); });
-      call.on('close', () => { if (c.voiceCall === call) { Voice.removeVoice(c.id); c.voiceCall = null; render(); } });
-    });
-    peer.on('disconnected', () => {
-      App.toast('Lost the room server. Reconnecting… (connected players stay connected)');
-      try { peer.reconnect(); } catch (e) {}
-    });
-    peer.on('error', (err) => {
-      if (err.type === 'unavailable-id') { peer.destroy(); open(romFile, hostName); return; }
-      if (err.type === 'peer-unavailable') return;
-      const text = `Connection problem: ${err.type || err.message}.`;
-      App.msg('lobbyMsg', text);
-      if (!$('#play').hidden) App.toast(text);
-      $('#hostBtn').disabled = false;
-    });
+    wireScreens();
+    render();
+    badge();
+    loadEmulator(romFile);
+    if (!pingTimer) pingTimer = setInterval(pingAll, 2000);
+    Relay.iceServers().then((servers) => { ice = servers; startLobby(); });
 
     $('#inviteBtn').onclick = invite;
+    wireDirect();
     $('#portList').onclick = onAction;
     $('#specList').onclick = onAction;
     MicUI.wire({ start: () => Voice.startHostMic(), stop: () => Voice.stopMic() });
@@ -90,7 +66,104 @@ const Host = (() => {
   function close() {
     for (const c of clients.values()) send(c, { t: 'closed' });
     Voice.stopMic();
-    try { peer.destroy(); } catch (e) {}
+    if (pending) pending.close();
+    try { if (peer) peer.destroy(); } catch (e) {}
+  }
+
+  // ---------- Room codes (lobby server) ----------
+  function startLobby() {
+    code = App.makeCode();
+    const me = new Peer(C.peerPrefix + code, App.peerOptions(ice));
+    peer = me;
+    me.on('open', () => {
+      $('#sheetCode').textContent = code;
+      badge();
+      App.toast(`Room ${code} is open. Tap play on the game to start.`);
+    });
+    me.on('connection', (dc) => {
+      const L = Links.fromPeerJS(dc, ice);
+      L.on('open', () => onJoin(L));
+    });
+    me.on('disconnected', () => { if (!me.destroyed) try { me.reconnect(); } catch (e) {} });
+    me.on('error', (err) => {
+      if (err.type === 'unavailable-id') { me.destroy(); startLobby(); return; }
+      if (err.type === 'peer-unavailable') return;
+      if (['network', 'server-error', 'socket-error', 'socket-closed', 'browser-incompatible'].includes(err.type) && !me.open) {
+        code = '';
+        $('#sheetCode').textContent = '—';
+        badge();
+        App.toast('Room codes aren’t available right now. Use Invite directly in the menu.');
+      }
+    });
+  }
+
+  // ---------- Direct invites (no lobby server) ----------
+  function wireDirect() {
+    $('#dInviteBtn').onclick = createInvite;
+    $('#dShareInvite').onclick = async () => {
+      const url = $('#dInviteCode').value;
+      try {
+        if (navigator.share) await navigator.share({ title: 'N6PhO', text: `Join my N6PhO game: ${url}` });
+        else { await navigator.clipboard.writeText(url); App.toast('Invite copied.'); }
+      } catch (e) {}
+    };
+    $('#dCopyInvite').onclick = async () => {
+      try { await navigator.clipboard.writeText($('#dInviteCode').value); App.toast('Invite copied.'); }
+      catch (e) { $('#dInviteCode').select(); }
+    };
+    $('#dPaste').onclick = async () => {
+      try { $('#dReply').value = await navigator.clipboard.readText(); } catch (e) { $('#dReply').focus(); }
+    };
+    $('#dConnect').onclick = acceptReply;
+  }
+
+  async function createInvite() {
+    if (!ice) { App.toast('Still getting ready, try again in a second.'); return; }
+    if (pending) pending.close();
+    const status = $('#dStatus');
+    status.textContent = 'Preparing invite…';
+    $('#dInviteBtn').disabled = true;
+    const L = new Links.DirectLink(ice, true);
+    pending = L;
+    try {
+      const relay = await Relay.shareable();
+      const text = await L.createInvite({ name: hostName, room: code, relay });
+      if (pending !== L) return;
+      $('#dInviteCode').value = `${location.origin}${location.pathname}#invite=${text}`;
+      $('#dReply').value = '';
+      $('#dInviteBox').hidden = false;
+      status.textContent = relay
+        ? 'Send this to one friend (it includes your relay logins), then paste their reply.'
+        : 'Send this to one friend, then paste their reply.';
+    } catch (e) {
+      status.textContent = 'Couldn’t make an invite. Try again.';
+    } finally { $('#dInviteBtn').disabled = false; }
+
+    // The friend's first message says who they are.
+    const hello = (m) => {
+      if (!m || m.t !== 'hello') return;
+      L.off('data', hello);
+      L.metadata = { name: m.name, role: m.role, token: m.token };
+      if (pending === L) pending = null;
+      $('#dInviteBox').hidden = true;
+      status.textContent = '';
+      onJoin(L);
+    };
+    L.on('data', hello);
+  }
+
+  async function acceptReply() {
+    const L = pending, status = $('#dStatus');
+    if (!L) { status.textContent = 'Create an invite first.'; return; }
+    try {
+      await L.acceptReply($('#dReply').value);
+    } catch (e) { status.textContent = e.message; return; }
+    status.textContent = 'Connecting…';
+    setTimeout(() => {
+      if (pending === L && !L.open) {
+        status.textContent = 'Couldn’t connect. One of you may be on a strict network: set up Your relay with sharing on, then send a new invite.';
+      }
+    }, 20000);
   }
 
   // ---------- Private screens ----------
@@ -350,12 +423,12 @@ const Host = (() => {
     const tracks = [getView(c.viewKey).track];
     const mix = Voice.outFor(c.id);
     if (mix) tracks.push(mix); else if (audioTrack) tracks.push(audioTrack);
-    const call = peer.call(c.id, new MediaStream(tracks));
+    const call = c.link.call(new MediaStream(tracks), { kind: 'game' });
     c.call = call;
     c.stats = null; c.statPrev = null;
-    if (call) setTimeout(() => {
-      if (call.peerConnection) NetStats.applyRate(call.peerConnection, c.rate || C.videoBitrate, C.streamFps);
-    }, 1500);
+    setTimeout(() => {
+      if (!call.closed) NetStats.applyRate(call.peerConnection, c.rate || C.videoBitrate, C.streamFps);
+    }, 2500);
   }
 
   // Every 2 s: read each guest's connection and adjust their picture quality.
@@ -373,11 +446,11 @@ const Host = (() => {
   }
 
   // ---------- Guests ----------
-  function onJoin(conn) {
-    const meta = conn.metadata || {};
+  function onJoin(link) {
+    const meta = link.metadata || {};
     const token = typeof meta.token === 'string' ? meta.token.slice(0, 64) : null;
     const c = {
-      id: conn.peer, conn, token, name: String(meta.name || 'Guest').slice(0, 16),
+      id: link.id, link, token, name: String(meta.name || 'Guest').slice(0, 16),
       slot: null, rtt: null, call: null, voiceCall: null, viewKey: null, last: new Map(),
       lastSeen: Date.now(), rate: null, fps: null, stats: null, statPrev: null
     };
@@ -398,18 +471,33 @@ const Host = (() => {
       if (s > 0) seat(c, s);
       else send(c, { t: 'note', text: 'All four ports are taken, so you joined as a spectator.' });
     }
-    conn.on('data', (d) => onData(c, d));
-    conn.on('close', () => drop(c, 'lost'));
-    conn.on('error', () => drop(c, 'lost'));
+    link.on('data', (d) => onData(c, d));
+    link.on('close', () => drop(c, 'lost'));
+    link.on('call', (call) => onGuestCall(c, call));
     callClient(c);
     App.toast(back != null ? `${c.name} is back on port ${c.slot + 1}.` : `${c.name} joined${c.slot != null ? ` on port ${c.slot + 1}` : ' to watch'}.`);
     broadcast();
+  }
+
+  // Guests send their mic to the host on a one-way call through their link.
+  function onGuestCall(c, call) {
+    if (call.metadata.kind !== 'voice') { call.close(); return; }
+    try { if (c.voiceCall) c.voiceCall.close(); } catch (e) {}
+    c.voiceCall = call;
+    call.answer();
+    call.on('stream', (st) => { Voice.addVoice(c.id, st); render(); });
+    call.on('close', () => { if (c.voiceCall === call) { Voice.removeVoice(c.id); c.voiceCall = null; render(); } });
   }
 
   function onData(c, d) {
     if (!d || typeof d !== 'object') return;
     c.lastSeen = Date.now();
     if (d.t === 'in') applyInput(c, d);
+    else if (d.t === 'relay') {
+      // Broker: pass connection messages between guests (voice mesh). Only signalling is forwarded.
+      const to = clients.get(d.to);
+      if (to && d.msg && d.msg.t === 'sig') send(to, { t: 'relay', from: c.id, msg: d.msg });
+    }
     else if (d.t === 'bye') drop(c, 'leave');
     else if (d.t === 'pong' && typeof d.ts === 'number') c.rtt = Math.round(performance.now() - d.ts);
   }
@@ -453,7 +541,7 @@ const Host = (() => {
     }
     try { if (c.call) c.call.close(); } catch (e) {}
     try { if (c.voiceCall) c.voiceCall.close(); } catch (e) {}
-    try { c.conn.close(); } catch (e) {}
+    try { c.link.close(); } catch (e) {}
     Voice.removeVoice(c.id);
     Voice.dropOut(c.id);
     updateViews();
@@ -462,13 +550,14 @@ const Host = (() => {
     broadcast();
   }
 
-  function send(c, m) { try { if (c.conn.open) c.conn.send(m); } catch (e) {} }
+  function send(c, m) { c.link.send(m); }
 
   function rosterFor(c) {
     return {
       t: 'roster', code,
       ports: ports.map((p, i) => (i === 0 ? hostName : p ? p.name : null)),
       rate: c.rate,
+      peers: [...clients.values()].filter((x) => x !== c).map((x) => ({ id: x.id, name: x.name })),
       you: c.slot,
       watching: [...clients.values()].filter((x) => x.slot == null).length,
       rtt: c.rtt, started,
@@ -501,7 +590,7 @@ const Host = (() => {
   function badge() {
     const players = 1 + ports.filter((p, i) => i > 0 && p).length;
     const watching = [...clients.values()].filter((c) => c.slot == null).length;
-    $('#badge').innerHTML = `<span class="dot p1"></span><span>Room ${esc(code)}</span><span class="dim">${players}P${watching ? ` +${watching} watching` : ''}${priv ? ', private' : ''}</span>`;
+    $('#badge').innerHTML = `<span class="dot p1"></span><span>${code ? `Room ${esc(code)}` : 'Direct'}</span><span class="dim">${players}P${watching ? ` +${watching} watching` : ''}${priv ? ', private' : ''}</span>`;
   }
 
   function render() {
@@ -564,6 +653,7 @@ const Host = (() => {
   }
 
   async function invite() {
+    if (!code) { App.toast('Room codes aren’t available right now. Use Create invite below.'); return; }
     const url = `${location.origin}${location.pathname}?room=${code}`;
     try {
       if (navigator.share) { await navigator.share({ title: 'N6PhO', text: `Join my N6PhO room: ${code}`, url }); return; }
