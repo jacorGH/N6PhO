@@ -66,14 +66,24 @@ const App = (() => {
   }
   // The emulator times itself off its audio. If iOS suspends that audio (a call, Siri, the mic
   // switching the audio session), the game freezes, so keep nudging it back to running.
+  // The emulator lives in its own frame; the host registers a bridge to reach its audio.
+  let emuBridge = null;
+  function setEmuBridge(fn) { emuBridge = fn; }
   function resumeEmuAudio() {
+    const b = emuBridge && emuBridge();
+    if (b) return b.resumeAudio();
     let stuck = false;
     for (const ctx of audio.ctxs) {
       if (ctx.state !== 'running' && ctx.state !== 'closed') { stuck = true; ctx.resume().catch(() => {}); }
     }
     return stuck;
   }
-  const emuAudioState = () => { for (const c of audio.ctxs) return c.state; return 'none'; };
+  const emuAudioState = () => {
+    const b = emuBridge && emuBridge();
+    if (b) return b.audioState();
+    for (const c of audio.ctxs) return c.state;
+    return 'none';
+  };
   document.addEventListener('pointerdown', resumeEmuAudio, true);
   setInterval(resumeEmuAudio, 1000);
 
@@ -240,6 +250,6 @@ const App = (() => {
   }
   window.addEventListener('DOMContentLoaded', init);
 
-  return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake, resumeEmuAudio, emuAudioState,
+  return { $, esc, clamp, prefs, show, msg, toast, makeCode, peerOptions, audioTrack, keepAwake, resumeEmuAudio, emuAudioState, setEmuBridge,
     layout, setAspect, onLayout, setScreenRect, enterPlay, openMenu, closeMenu };
 })();

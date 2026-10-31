@@ -4,7 +4,9 @@ const Host = (() => {
   const C = window.N6;
   const { $, esc } = App;
   let peer = null, code = '', hostName = 'Host', started = false, pingTimer = 0, romFile = null, gameName = '';
-  let ice = null, pending = null; // ice = ICE servers in use; pending = direct invite waiting for a reply
+  let ice = null, pending = null;
+  let frameEl = null, everStarted = false, perfTimer = 0; // frameEl = the emulator's frame (emu.html)
+  const bridge = () => (frameEl && frameEl.contentWindow && frameEl.contentWindow.__n6) || null; // ice = ICE servers in use; pending = direct invite waiting for a reply
   let audioTrack = null, drawRaf = 0, lastDraw = 0;
   let priv = false, split = 'quad', quality = 'auto', mid = 0.06;
   let preset = null, gw = 0; // gw = CSS width of the emulator box (sets its render resolution)
@@ -59,6 +61,7 @@ const Host = (() => {
     qEl.onchange = () => { quality = qEl.value; App.prefs.set('quality', quality); for (const c of clients.values()) c.rate = null; };
     $('#ejsMenuBtn').onclick = () => setNative(true);
     $('#ejsDone').onclick = () => setNative(false);
+    $('#swapRom').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; swapGame(f); };
     $('#qsBtn').onclick = () => gameCall('quickSave', 'Saved.');
     $('#qlBtn').onclick = () => gameCall('quickLoad', 'Loaded.');
   }
@@ -291,8 +294,9 @@ const Host = (() => {
     App.closeMenu();
     $('#play').classList.toggle('ejs-native', on);
     $('#ejsDone').hidden = !on;
+    const b = bridge();
+    if (b) b.setChrome(on);
     if (on) App.toast('Tap the game to show the emulator menu.');
-    window.dispatchEvent(new Event('resize')); // let EmulatorJS resize its canvas
     App.layout();
   }
 
@@ -310,8 +314,7 @@ const Host = (() => {
     if (!cv || !cv.width || !gw) return;
     const ratio = cv.width / gw;
     if (Math.abs(cv.width - preset.render) / preset.render > 0.25 && ratio > 0) {
-      setRenderWidth(preset.render / ratio);
-      window.dispatchEvent(new Event('resize'));
+      setRenderWidth(preset.render / ratio); // the frame resizes, and EmulatorJS follows
     }
     App.layout();
   }
@@ -362,50 +365,85 @@ const Host = (() => {
   }
 
   // ---------- Emulator ----------
+  // EmulatorJS runs in its own frame (emu.html). Swapping games replaces only the frame.
+  let romUrl = null;
   function loadEmulator(file) {
-    window.EJS_player = '#game';
-    window.EJS_core = 'n64';
-    window.EJS_pathtodata = C.ejsData;
-    window.EJS_gameUrl = URL.createObjectURL(file);
-    window.EJS_gameName = gameName;
-    window.EJS_color = '#d8352b';
-    window.EJS_onGameStart = onGameStart;
-    window.EJS_defaultOptions = Object.assign({}, preset.options);
+    if (frameEl) { const b = bridge(); if (b) b.flushSaves(); frameEl.remove(); frameEl = null; }
+    if (romUrl) URL.revokeObjectURL(romUrl);
+    romUrl = URL.createObjectURL(file);
+    const f = document.createElement('iframe');
+    f.src = 'emu.html';
+    f.title = 'Emulator';
+    f.setAttribute('allow', 'autoplay; gamepad; fullscreen');
+    f.addEventListener('load', () => {
+      const b = f.contentWindow && f.contentWindow.__n6;
+      if (!b) { App.toast('Could not start the emulator frame.'); return; }
+      b.boot({
+        core: 'n64', data: C.ejsData, gameUrl: romUrl, gameName, color: '#d8352b',
+        options: Object.assign({}, preset.options),
+        onGameStart, onError: () => App.toast('Could not load the emulator. Check your connection and reload.')
+      });
+    }, { once: true });
+    frameEl = f;
+    $('#gameWrap').appendChild(f);
+    App.setEmuBridge(bridge);
     placeGame();
-    const s = document.createElement('script');
-    s.src = C.ejsData + 'loader.js';
-    s.onerror = () => App.toast('Could not load the emulator. Check your connection and reload.');
-    document.body.appendChild(s);
   }
 
-  function gm() { return window.EJS_emulator && window.EJS_emulator.gameManager; }
+  // ---------- Swap the game without ending the room ----------
+  function swapGame(file) {
+    if (!file) return;
+    App.closeMenu();
+    for (const c of clients.values()) release(c);
+    release(local);
+    started = false;
+    audioTrack = null;
+    priv = false; $('#optPrivate').checked = false;
+    perf.lastNum = null; perf.stalledFor = 0; perf.warned = false;
+    romFile = file;
+    gameName = file.name.replace(/\.[^.]+$/, '');
+    // per-game screen settings
+    split = App.prefs.get('split:' + gameName) || 'quad'; $('#splitSel').value = split;
+    mid = App.prefs.get('mid:' + gameName) ?? App.prefs.get('mid'); $('#midRange').value = mid;
+    $('#midVal').textContent = mid ? `${Math.round(mid * 100)}%` : 'off';
+    for (const [k, v] of views) v.rect = rectOf(k);
+    updateViews();
+    $('#play').classList.add('prestart');
+    for (const c of clients.values()) send(c, { t: 'note', text: `${hostName} is switching to ${gameName}…` });
+    broadcast();
+    loadEmulator(file);
+    App.toast(`Loading ${gameName}. Tap play on the game to start. Everyone stays connected.`);
+  }
+
+  function gm() { const b = bridge(); return b ? b.gameManager() : null; }
   function sim(player, id, value) { const g = gm(); if (g && g.simulateInput) g.simulateInput(player, id, value); }
   function gameCall(fn, done) {
     const g = gm();
     if (!started || !g || typeof g[fn] !== 'function') { App.toast('Start the game first.'); return; }
     try { g[fn](1); App.toast(done); App.closeMenu(); } catch (e) { App.toast('That didn’t work in this build.'); }
   }
-  function emuCanvas() {
-    return (window.EJS_emulator && window.EJS_emulator.canvas) || document.querySelector('#game canvas');
-  }
+  function emuCanvas() { const b = bridge(); return b ? b.canvas() : null; }
 
   function onGameStart() {
     started = true;
+    everStarted = true;
     $('#play').classList.remove('prestart');
     setTimeout(fixRenderSize, 500);
     App.layout();
     if (!drawRaf) drawRaf = requestAnimationFrame(frame);
-    setInterval(perfTick, 1000);
+    if (!perfTimer) perfTimer = setInterval(perfTick, 1000);
     updateViews();
     attachAudio(0);
-    for (const c of clients.values()) callClient(c);
+    // Guests already watching keep their stream through a game swap; only call those without one.
+    for (const c of clients.values()) if (!c.call || c.call.closed) callClient(c);
     broadcast();
   }
 
   // Game audio starts a moment after the game. It feeds each guest's mix (game + voices).
   // Without Web Audio, fall back to sending the raw game audio and re-calling guests.
   function attachAudio(tries) {
-    const a = App.audioTrack();
+    const b = bridge();
+    const a = b ? b.audioTrack() : null;
     if (a) {
       if (!audioTrack) {
         audioTrack = a;
@@ -557,6 +595,7 @@ const Host = (() => {
       t: 'roster', code,
       ports: ports.map((p, i) => (i === 0 ? hostName : p ? p.name : null)),
       rate: c.rate,
+      game: gameName,
       peers: [...clients.values()].filter((x) => x !== c).map((x) => ({ id: x.id, name: x.name })),
       you: c.slot,
       watching: [...clients.values()].filter((x) => x.slot == null).length,

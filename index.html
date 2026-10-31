@@ -156,7 +156,7 @@
 <!-- Play screen (host and guests) -->
 <section id="play" class="screen" hidden>
   <div id="screenArea">
-    <div id="gameWrap" data-for="host"><div id="game"></div></div>
+    <div id="gameWrap" data-for="host"></div>
     <div id="crop" data-for="guest"><video id="remote" playsinline autoplay muted></video></div>
     <p id="waiting" data-for="guest">Waiting for the host to start the game…</p>
   </div>
@@ -229,6 +229,8 @@
           <button id="qsBtn" class="btn small">Quick save</button>
           <button id="qlBtn" class="btn small">Quick load</button>
         </div>
+        <label class="btn small file swap-game">Change game<input id="swapRom" type="file" accept=".z64,.n64,.v64,.zip,.7z"></label>
+        <p class="dim small note">Everyone stays connected while the new game loads. Quick save first if you want to come back to this one.</p>
         <button id="ejsMenuBtn" class="btn small ejs-open">Emulator menu (settings, cheats, save files)</button>
       </section>
 

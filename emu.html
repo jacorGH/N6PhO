@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N6PhO emulator</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #game { width: 100%; height: 100%; }
+  /* N6PhO draws its own touch controller */
+  .ejs_virtualGamepad_parent { display: none !important; }
+  /* During play, hide every EmulatorJS button and menu; only the game picture shows.
+     (Visibility, not display, so the canvas can opt back in whatever EmulatorJS calls its parts.) */
+  body.playing #game * { visibility: hidden !important; }
+  body.playing #game canvas { visibility: visible !important; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<script src="js/emu-frame.js"></script>
+</body>
+</html>

@@ -193,6 +193,7 @@ const Guest = (() => {
   }
 
   function roster(r) {
+    if (lastRoster && r.game && lastRoster.game && r.game !== lastRoster.game) App.toast(`Now playing ${r.game}.`);
     lastRoster = r;
     badge();
     if (!r.started) $('#waiting').hidden = false;

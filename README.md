@@ -25,8 +25,19 @@ N64 netplay on your phone: up to 4 players plus spectators, built on EmulatorJS
   working. N6PhO nudges the audio back every second and on every tap. If *Game audio* shows
   anything other than "running" during a freeze, that's the cause.
 
+## Change game without ending the room
+Host menu → Game → **Change game**. Everyone stays connected: links, voice chat and each
+guest's stream keep running while the new game loads, and guests see "waiting for the host" until
+you tap play. The old game's battery save is written first; quick save if you want to come back
+to the exact spot. Private screens turn off for the new game's menus, and split layout and middle
+strip switch to whatever you used last time for that game.
+
+How it works: EmulatorJS runs inside its own frame (`emu.html` + `js/emu-frame.js`). Changing game
+replaces only that frame. The guests' video and sound are copied from the frame, so their streams
+simply switch to the new game.
+
 ## Emulator menu
-During play, taps on the game don't open EmulatorJS's own menu (it would appear oversized,
+During play, all of EmulatorJS's own buttons are hidden and taps on the game don't open its menu (it would appear oversized,
 because the emulator renders in a small box that's scaled up for speed). To use it, open
 **host menu → Game → Emulator menu**: the emulator fills the screen at normal size so its settings,
 cheats and save-file import/export fit. Tap the game to show its menu bar, then **Back to N6PhO**.

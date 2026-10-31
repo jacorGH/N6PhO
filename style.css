@@ -109,7 +109,6 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
 #gameWrap { position: absolute; left: 0; top: 0; width: 640px; height: 480px; transform-origin: 0 0; }
 /* Once the game runs, taps don't reach EmulatorJS's own (scaled-up) menu; N6PhO's menu is used instead. */
 #play:not(.prestart):not(.ejs-native) #gameWrap { pointer-events: none; }
-#play:not(.prestart):not(.ejs-native) .ejs_menu_bar { display: none !important; }
 /* Emulator menu mode: the emulator fills the screen at normal size so its menus fit. */
 #play.ejs-native #screenArea { z-index: 7; overflow: visible; }
 #play.ejs-native #gameWrap {
@@ -127,7 +126,8 @@ body[data-role="guest"] [data-for="host"] { display: none !important; }
   background: #000;
   overflow: hidden;
 }
-#game { width: 100%; height: 100%; }
+#gameWrap iframe { display: block; width: 100%; height: 100%; border: 0; }
+.swap-game { width: 100%; margin-top: .6rem; }
 body.skin-under #screenArea { z-index: 3; }
 #crop { position: relative; overflow: hidden; }
 #remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; background: #000; }
@@ -162,8 +162,6 @@ body.land .skin {
 .sk-thumb { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 #play.noskin #screenArea { top: var(--sat); bottom: var(--sab); height: auto; }
 
-/* Hide EmulatorJS's own touch gamepad; N6PhO draws its own */
-.ejs_virtualGamepad_parent { display: none !important; }
 
 /* ---------- Skin items ---------- */
 .sk-item { position: absolute; touch-action: none; }
